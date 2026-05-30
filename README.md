@@ -85,6 +85,20 @@ vercel deploy --prod
 
 أضف متغيرات البيئة في لوحة تحكم Vercel.
 
+## النشر على InfinityFree
+
+إذا كنت ستستخدم InfinityFree لاستضافة النسخة الرئيسية فقط:
+
+1. شغّل:
+   ```bash
+   npm run build
+   ```
+2. ارفع محتوى مجلد `dist/` إلى مجلد `htdocs/` في حساب InfinityFree.
+3. تأكد أن الملف `.htaccess` موجود في جذر `htdocs/` ليعمل إعادة التوجيه للصفحات الداخلية.
+4. لا تنشئ موقع Node.js على InfinityFree، فهو لا يدعم تشغيل `server.js`.
+
+> ملاحظة: إذا أردت بوابة تحديث خارجية مستقلة، فهي تحتاج استضافة تدعم Node.js مثل Render أو Railway أو Fly.io.
+
 ## هيكل المشروع
 
 ```
