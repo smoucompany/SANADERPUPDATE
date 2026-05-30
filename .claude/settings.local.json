@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\65\\\\supabase\\\\migrations\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\65\\\\supabase\\\\functions\\\\send-email\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\65\\\\supabase\\\\functions\\\\send-whatsapp\")",
+      "PowerShell(netstat -ano)",
+      "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\65\\\\src\\\\pages\\\\hr\")",
+      "PowerShell(Get-Process -Name \"node\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force)",
+      "PowerShell(cd d:\\\\65; \\(Get-Content src\\\\pages\\\\hr\\\\HRDashboardPage.tsx | Measure-Object -Line\\).Lines)",
+      "PowerShell(cd d:\\\\65; npx tsc --noEmit 2>&1; echo \"Exit: $LASTEXITCODE\")",
+      "PowerShell(cd d:\\\\65; \\(Get-Content src\\\\pages\\\\settings\\\\SettingsPage.tsx\\).Count)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:3001\" -TimeoutSec 3 -UseBasicParsing; \"running: $\\($r.StatusCode\\)\" } catch { \"not running\" })",
+      "PowerShell(Start-Process \"http://localhost:3002\")",
+      "PowerShell(\\(Get-Content \"D:\\\\65\\\\src\\\\pages\\\\pos\\\\POSPage.tsx\" | Measure-Object -Line\\).Lines)",
+      "PowerShell(cd d:\\\\65; \\(Get-Content \"src\\\\pages\\\\accounting\\\\FinancialStatementsPage.tsx\"\\).Count)",
+      "PowerShell(cd d:\\\\65; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npm run build 2>&1 | Select-Object -Last 8)",
+      "PowerShell(node -e \"require\\('playwright'\\)\" 2>&1)",
+      "PowerShell(npm list playwright --prefix d:\\\\65 2>&1)",
+      "PowerShell(npm install -g playwright 2>&1)",
+      "PowerShell(npx playwright install chromium 2>&1)",
+      "PowerShell(Get-Content \"d:\\\\65\\\\.env\" | Where-Object { $_ -notmatch \"SECRET|KEY\" } | Select-Object -First 10)"
+    ]
+  }
+}

@@ -1,0 +1,549 @@
+/* ═══════════════════════════════════════════════════════════════
+   Professional Print Styles — A4 & Thermal
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Shared print reset ──────────────────────────────────────── */
+@media print {
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  body {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif !important;
+    direction: rtl !important;
+  }
+
+  /* ── Pages WITHOUT a dedicated print template ──
+     Hide the sidebar/header/buttons and let the page content print normally. */
+  aside, nav, .sidebar-item,
+  header, .no-print,
+  button, .toaster,
+  [data-radix-popper-content-wrapper] { display: none !important; }
+
+  .flex.flex-col.min-h-screen { margin: 0 !important; }
+  main { padding: 0 !important; }
+
+  /* ── Pages WITH a dedicated print template (A4 / thermal) ──
+   * Use :has() so the visibility trick only fires when a template
+   * is actually in the DOM.  Supported in Chrome 105+, Safari 15.4+,
+   * Firefox 121+ — fine for a modern ERP.
+   *
+   * Strategy:
+   *   1. Hide every DOM node (visibility keeps layout intact so
+   *      position:absolute still works correctly).
+   *   2. Reveal the template and every node inside it.
+   *   3. Pin it to the top-left corner so nothing else bleeds in.
+   */
+  body:has(.print-a4-wrapper) * { visibility: hidden !important; }
+  body:has(.print-a4-wrapper) .print-a4-wrapper,
+  body:has(.print-a4-wrapper) .print-a4-wrapper * { visibility: visible !important; }
+  body:has(.print-a4-wrapper) .print-a4-wrapper {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    background: white !important;
+  }
+
+  body:has(.print-thermal-wrapper) * { visibility: hidden !important; }
+  body:has(.print-thermal-wrapper) .print-thermal-wrapper,
+  body:has(.print-thermal-wrapper) .print-thermal-wrapper * { visibility: visible !important; }
+  body:has(.print-thermal-wrapper) .print-thermal-wrapper {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    background: white !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   A4 INVOICE TEMPLATE
+   ══════════════════════════════════════════════════════════════ */
+
+.print-a4-wrapper {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  background: white;
+  font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+  font-size: 9pt;
+  color: #1a1a2e;
+  direction: rtl;
+}
+
+/* Header band */
+.print-a4-header-band {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2d6a9f 60%, #1a8fe3 100%);
+  padding: 14pt 20pt;
+  color: white;
+}
+
+.print-a4-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.print-a4-company {
+  display: flex;
+  align-items: center;
+  gap: 12pt;
+}
+
+.print-a4-logo {
+  width: 52pt;
+  height: 52pt;
+  object-fit: contain;
+  background: white;
+  border-radius: 8pt;
+  padding: 4pt;
+}
+
+.print-a4-company-name {
+  font-size: 16pt;
+  font-weight: 900;
+  margin: 0;
+  letter-spacing: -0.5pt;
+  color: white;
+}
+
+.print-a4-company-en {
+  font-size: 8pt;
+  margin: 2pt 0 0;
+  opacity: 0.85;
+  letter-spacing: 1pt;
+  text-transform: uppercase;
+  color: #b3d4f5;
+}
+
+.print-a4-invoice-badge {
+  text-align: center;
+  background: rgba(255,255,255,0.15);
+  border: 1.5pt solid rgba(255,255,255,0.4);
+  border-radius: 8pt;
+  padding: 8pt 16pt;
+  backdrop-filter: blur(4pt);
+}
+
+.print-a4-badge-title {
+  font-size: 11pt;
+  font-weight: 800;
+  color: white;
+  letter-spacing: 0.5pt;
+}
+
+.print-a4-badge-subtitle {
+  font-size: 7pt;
+  color: #b3d4f5;
+  letter-spacing: 2pt;
+  margin: 1pt 0;
+}
+
+.print-a4-badge-number {
+  font-size: 13pt;
+  font-weight: 900;
+  color: #ffe066;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1pt;
+}
+
+/* Info row */
+.print-a4-info-row {
+  display: flex;
+  gap: 0;
+  border-bottom: 2pt solid #1e3a5f;
+}
+
+.print-a4-info-box {
+  flex: 1;
+  padding: 10pt 12pt;
+  font-size: 8.5pt;
+  line-height: 1.7;
+}
+
+.print-a4-info-box + .print-a4-info-box {
+  border-right: 1pt solid #d1dce8;
+}
+
+.print-a4-info-company  { background: #f0f6ff; }
+.print-a4-info-details  { background: #f8fbff; }
+.print-a4-info-customer { background: #f0f6ff; }
+
+.print-a4-info-title {
+  font-size: 8pt;
+  font-weight: 800;
+  color: #1e3a5f;
+  text-transform: uppercase;
+  letter-spacing: 1pt;
+  padding-bottom: 4pt;
+  margin-bottom: 5pt;
+  border-bottom: 1.5pt solid #1e3a5f;
+}
+
+.print-a4-info-box p { margin: 0 0 2pt; }
+.print-a4-info-box p span { font-weight: 700; color: #1e3a5f; margin-left: 4pt; }
+
+.print-a4-status-badge {
+  display: inline-block;
+  margin-top: 5pt;
+  padding: 2pt 8pt;
+  border-radius: 20pt;
+  font-size: 8pt;
+  font-weight: 800;
+}
+.print-a4-status-badge.paid    { background: #dcfce7; color: #166534; border: 1pt solid #86efac; }
+.print-a4-status-badge.pending { background: #fef3c7; color: #92400e; border: 1pt solid #fcd34d; }
+
+.print-a4-customer-name {
+  font-size: 11pt !important;
+  font-weight: 900 !important;
+  color: #1e3a5f !important;
+  margin-bottom: 4pt !important;
+}
+
+.print-a4-cash-customer {
+  font-size: 10pt !important;
+  font-weight: 700 !important;
+  color: #64748b !important;
+}
+
+/* Items table */
+.print-a4-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 8.5pt;
+}
+
+.print-a4-table thead tr {
+  background: linear-gradient(90deg, #1e3a5f, #2d6a9f);
+  color: white;
+}
+
+.print-a4-table th {
+  padding: 7pt 8pt;
+  text-align: right;
+  font-weight: 800;
+  font-size: 8pt;
+  letter-spacing: 0.3pt;
+  border: none;
+  white-space: nowrap;
+}
+
+.print-a4-th-seq  { width: 5%; text-align: center; }
+.print-a4-th-item { width: 38%; }
+
+.print-a4-table td {
+  padding: 6pt 8pt;
+  border-bottom: 0.5pt solid #e2e8f0;
+  vertical-align: middle;
+}
+
+.print-a4-row-even { background: white; }
+.print-a4-row-odd  { background: #f8faff; }
+
+.print-a4-td-center { text-align: center; }
+.print-a4-td-num    { text-align: left; font-variant-numeric: tabular-nums; }
+.print-a4-td-total  { text-align: left; font-weight: 800; color: #1e3a5f; font-variant-numeric: tabular-nums; }
+
+.print-a4-item-name    { font-weight: 700; font-size: 8.5pt; }
+.print-a4-item-barcode { font-size: 7pt; color: #64748b; font-family: monospace; margin-top: 1pt; }
+
+/* Footer row */
+.print-a4-footer-row {
+  display: flex;
+  gap: 0;
+  border-top: 2pt solid #1e3a5f;
+  min-height: 80pt;
+}
+
+.print-a4-notes {
+  flex: 1.4;
+  padding: 10pt 12pt;
+  border-left: 1pt solid #d1dce8;
+  background: #fafbff;
+}
+
+.print-a4-notes-title {
+  font-size: 8pt;
+  font-weight: 800;
+  color: #1e3a5f;
+  text-transform: uppercase;
+  letter-spacing: 1pt;
+  margin-bottom: 5pt;
+}
+
+.print-a4-notes-text {
+  font-size: 8pt;
+  line-height: 1.6;
+  color: #334155;
+}
+
+.print-a4-terms {
+  font-size: 7.5pt;
+  color: #64748b;
+  margin-top: 6pt;
+  border-top: 0.5pt dashed #cbd5e1;
+  padding-top: 5pt;
+}
+
+.print-a4-totals {
+  flex: 1;
+  padding: 10pt 12pt;
+  background: #f0f6ff;
+}
+
+.print-a4-total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4pt 0;
+  font-size: 9pt;
+  border-bottom: 0.5pt dashed #cbd5e1;
+}
+
+.print-a4-total-row.discount { color: #dc2626; }
+.print-a4-total-row.paid     { color: #16a34a; }
+.print-a4-total-row.remaining{ color: #d97706; }
+
+.print-a4-total-row.grand {
+  font-size: 12pt !important;
+  font-weight: 900 !important;
+  color: white !important;
+  background: linear-gradient(90deg, #1e3a5f, #2d6a9f) !important;
+  padding: 6pt 8pt !important;
+  margin: 4pt -4pt !important;
+  border-radius: 4pt !important;
+  border: none !important;
+}
+
+/* Signatures */
+.print-a4-signatures {
+  display: flex;
+  justify-content: space-around;
+  padding: 12pt 20pt;
+  border-top: 1pt solid #e2e8f0;
+  margin-top: 8pt;
+}
+
+.print-a4-sig-box {
+  text-align: center;
+  width: 28%;
+}
+
+.print-a4-sig-role {
+  font-size: 8pt;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin-bottom: 3pt;
+}
+
+.print-a4-sig-line {
+  width: 100%;
+  border-bottom: 1.5pt solid #1e3a5f;
+  margin: 24pt 0 4pt;
+}
+
+.print-a4-sig-name {
+  font-size: 7.5pt;
+  color: #64748b;
+}
+
+/* Document footer band */
+.print-a4-doc-footer {
+  margin-top: auto;
+}
+
+.print-a4-footer-band {
+  background: linear-gradient(90deg, #1e3a5f, #2d6a9f);
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6pt 16pt;
+  font-size: 7.5pt;
+  flex-wrap: wrap;
+  gap: 8pt;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   THERMAL RECEIPT TEMPLATE (80mm)
+   ══════════════════════════════════════════════════════════════ */
+
+.print-thermal-wrapper {
+  width: 72mm;
+  margin: 0 auto;
+  padding: 4mm 3mm;
+  background: white;
+  font-family: 'Cairo', 'Courier New', monospace;
+  font-size: 9pt;
+  color: #000;
+  direction: rtl;
+  line-height: 1.5;
+}
+
+.print-thermal-header {
+  text-align: center;
+  margin-bottom: 3mm;
+}
+
+.print-thermal-store-name {
+  font-size: 13pt;
+  font-weight: 900;
+  letter-spacing: -0.5pt;
+  margin-bottom: 1mm;
+}
+
+.print-thermal-address,
+.print-thermal-phone,
+.print-thermal-vat {
+  font-size: 8pt;
+  color: #333;
+}
+
+.print-thermal-divider {
+  font-size: 9pt;
+  text-align: center;
+  margin: 2mm 0;
+  letter-spacing: 0;
+  color: #555;
+  overflow: hidden;
+}
+
+.print-thermal-info {
+  margin: 1mm 0;
+}
+
+.print-thermal-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8.5pt;
+  padding: 0.5mm 0;
+}
+
+.print-thermal-mono {
+  font-family: monospace;
+  font-weight: 700;
+}
+
+.print-thermal-items-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8pt;
+  font-weight: 800;
+  padding: 1mm 0;
+}
+
+.print-thermal-item-desc { flex: 1; }
+
+.print-thermal-item {
+  margin: 1mm 0;
+  font-size: 8.5pt;
+}
+
+.print-thermal-item-name {
+  font-weight: 700;
+}
+
+.print-thermal-item-calc {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8pt;
+  color: #333;
+  padding-right: 4mm;
+}
+
+.print-thermal-item-total {
+  font-weight: 700;
+  color: #000;
+}
+
+.print-thermal-totals {
+  margin: 1mm 0;
+}
+
+.print-thermal-totals .discount { color: #c00; }
+
+.print-thermal-grand-total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14pt;
+  font-weight: 900;
+  padding: 1.5mm 0;
+}
+
+.print-thermal-payment .change { font-weight: 800; }
+
+.print-thermal-qr-section {
+  text-align: center;
+  margin: 3mm 0 2mm;
+}
+
+.print-thermal-qr-box {
+  display: inline-block;
+}
+
+.print-thermal-qr-svg {
+  width: 28mm;
+  height: 28mm;
+}
+
+.print-thermal-qr-text {
+  font-size: 7pt;
+  color: #555;
+  margin-top: 1mm;
+}
+
+.print-thermal-footer {
+  text-align: center;
+  margin-top: 3mm;
+  padding-top: 2mm;
+  border-top: 1pt dashed #999;
+}
+
+.print-thermal-thanks {
+  font-size: 12pt;
+  font-weight: 900;
+  margin-bottom: 1mm;
+}
+
+.print-thermal-thanks-en {
+  font-size: 9pt;
+  color: #555;
+}
+
+.print-thermal-notes {
+  font-size: 8pt;
+  margin-top: 2mm;
+  color: #333;
+}
+
+.print-thermal-footer-line {
+  font-size: 7pt;
+  color: #888;
+  margin-top: 2mm;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   @media print — page size & color accuracy
+   ══════════════════════════════════════════════════════════════ */
+
+@media print {
+  /* A4 page setup */
+  @page { size: A4; margin: 10mm; }
+
+  /* Thermal page setup — must be set separately in a portal if needed */
+  /* @page .thermal { size: 80mm auto; margin: 3mm; } */
+
+  /* Force colour-accurate backgrounds on gradient elements */
+  .print-a4-header-band,
+  .print-a4-table thead tr,
+  .print-a4-total-row.grand,
+  .print-a4-footer-band {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
