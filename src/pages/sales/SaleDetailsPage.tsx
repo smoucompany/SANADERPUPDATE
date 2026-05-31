@@ -63,7 +63,7 @@ export default function SaleDetailsPage() {
               <button onClick={() => navigate('/sales')} className="btn-outline gap-1.5">
                 <ArrowRight className="w-4 h-4" />رجوع
               </button>
-              <button onClick={() => window.print()} className="btn-outline gap-1.5 cursor-pointer">
+              <button type="button" onClick={() => window.print()} className="btn-outline gap-1.5 cursor-pointer">
                 <Printer className="w-4 h-4" />طباعة
               </button>
               <button onClick={() => navigate(`/sales/${id}/edit`)} className="btn-primary gap-1.5 cursor-pointer">
@@ -222,7 +222,7 @@ export default function SaleDetailsPage() {
             </div>
 
             <div className="flex flex-col gap-2">
-              <button onClick={() => window.print()} className="btn-outline gap-2 w-full cursor-pointer">
+              <button type="button" onClick={() => window.print()} className="btn-outline gap-2 w-full cursor-pointer">
                 <Printer className="w-4 h-4" />طباعة الفاتورة
               </button>
               <button className="btn-outline gap-2 w-full cursor-pointer">

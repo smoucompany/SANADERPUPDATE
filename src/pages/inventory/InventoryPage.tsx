@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -25,6 +26,7 @@ interface InventoryItem {
 }
 
 export default function InventoryPage() {
+  const navigate = useNavigate()
   const { user } = useAuthStore()
   const qc = useQueryClient()
   const { data: warehouses = [] } = useWarehouses()
@@ -165,7 +167,7 @@ export default function InventoryPage() {
             <button onClick={handleExportInventory} className="btn-outline gap-1.5 text-sm">
               <Download className="w-4 h-4" />تصدير Excel
             </button>
-            <button className="btn-outline gap-1.5 text-sm">
+            <button onClick={() => navigate('/inventory/transfer')} className="btn-outline gap-1.5 text-sm">
               <ArrowLeftRight className="w-4 h-4" />تحويل مخزون
             </button>
           </>

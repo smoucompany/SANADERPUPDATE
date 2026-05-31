@@ -29,22 +29,26 @@ const STATUS_CFG = {
   expired:  { label: 'منتهي',   color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
 }
 
-const MOCK_QUOTES: Quotation[] = [
-  { id: '1', quote_number: 'QUO-00001', customer_name: 'شركة الأفق', quote_date: '2026-05-20', valid_until: '2026-06-20', total: 15800, status: 'sent' },
-  { id: '2', quote_number: 'QUO-00002', customer_name: 'مؤسسة النور', quote_date: '2026-05-22', valid_until: '2026-06-22', total: 7500, status: 'accepted' },
-  { id: '3', quote_number: 'QUO-00003', customer_name: 'محمد العمري', quote_date: '2026-05-25', valid_until: '2026-06-25', total: 3200, status: 'draft' },
-  { id: '4', quote_number: 'QUO-00004', customer_name: 'مجموعة المستقبل', quote_date: '2026-04-10', valid_until: '2026-05-10', total: 22000, status: 'expired' },
-]
-
 export default function QuotationsPage() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
 
-  const filtered = MOCK_QUOTES.filter(q => !statusFilter || q.status === statusFilter)
+  const { data: quotes = [] } = useQuery<Quotation[]>({
+    queryKey: ['quotations', user?.company_id],
+    queryFn: async () => {
+      if (!user) return []
+      const { data } = await supabase.from('quotations').select('*').eq('company_id', user.company_id).order('quote_date', { ascending: false })
+      return (data as Quotation[]) || []
+    },
+    enabled: !!user,
+  })
+
+  const filtered = quotes.filter(q => !statusFilter || q.status === statusFilter)
   const totalValue = filtered.reduce((s, q) => s + q.total, 0)
-  const accepted = MOCK_QUOTES.filter(q => q.status === 'accepted').length
-  const conversionRate = Math.round((accepted / MOCK_QUOTES.length) * 100)
+  const accepted = quotes.filter(q => q.status === 'accepted').length
+  const conversionRate = quotes.length > 0 ? Math.round((accepted / quotes.length) * 100) : 0
 
   const columns: Column<Quotation>[] = [
     { key: 'quote_number', label: 'رقم العرض',
@@ -93,7 +97,7 @@ export default function QuotationsPage() {
     <div className="space-y-5">
       <PageHeader
         title="عروض الأسعار"
-        subtitle={`${MOCK_QUOTES.length} عرض سعر`}
+        subtitle={`${quotes.length} عرض سعر`}
         actions={
           <button onClick={() => navigate('/quotations/new')} className="btn-primary gap-1.5">
             <Plus className="w-4 h-4" />عرض سعر جديد
@@ -104,10 +108,10 @@ export default function QuotationsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'إجمالي العروض', value: MOCK_QUOTES.length, color: 'text-foreground', icon: FileText, iconColor: 'bg-blue-500' },
-          { label: 'إجمالي القيمة', value: formatCurrency(MOCK_QUOTES.reduce((s,q) => s+q.total,0)), color: 'text-blue-600', icon: FileText, iconColor: 'bg-indigo-500' },
+          { label: 'إجمالي العروض', value: quotes.length, color: 'text-foreground', icon: FileText, iconColor: 'bg-blue-500' },
+          { label: 'إجمالي القيمة', value: formatCurrency(quotes.reduce((s,q) => s+q.total,0)), color: 'text-blue-600', icon: FileText, iconColor: 'bg-indigo-500' },
           { label: 'نسبة التحويل', value: `${conversionRate}%`, color: 'text-emerald-600', icon: CheckCircle2, iconColor: 'bg-emerald-500' },
-          { label: 'في الانتظار', value: MOCK_QUOTES.filter(q => q.status === 'sent').length, color: 'text-amber-600', icon: Clock, iconColor: 'bg-amber-500' },
+          { label: 'في الانتظار', value: quotes.filter(q => q.status === 'sent').length, color: 'text-amber-600', icon: Clock, iconColor: 'bg-amber-500' },
         ].map(s => (
           <div key={s.label} className="bg-card border border-border/60 rounded-2xl p-4 flex items-center gap-3">
             <div className={`w-10 h-10 ${s.iconColor} rounded-xl flex items-center justify-center shrink-0`}>

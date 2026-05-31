@@ -16,16 +16,6 @@ const LABEL_SIZES: Record<LabelSize, { label: string; w: string; h: string; desc
   large:  { label: 'كبير',  w: '10cm', h: '6cm',   desc: '10×6 سم' },
 }
 
-const MOCK_PRODUCTS = [
-  { id:'1', name_ar:'لابتوب Dell Inspiron 15', barcode:'4901234567890', sku:'DELL-INS-15', selling_price:4500, unit:'قطعة' },
-  { id:'2', name_ar:'طابعة HP LaserJet Pro',   barcode:'4901234567891', sku:'HP-LJ-PRO',  selling_price:1800, unit:'قطعة' },
-  { id:'3', name_ar:'ماوس لاسلكي Logitech',   barcode:'4901234567892', sku:'LOG-MX-WL',  selling_price:150,  unit:'قطعة' },
-  { id:'4', name_ar:'لوحة مفاتيح ميكانيكية',  barcode:'4901234567893', sku:'KB-MECH-01', selling_price:320,  unit:'قطعة' },
-  { id:'5', name_ar:'شاشة Samsung 27 بوصة',   barcode:'4901234567894', sku:'SAM-27-FHD', selling_price:1200, unit:'قطعة' },
-  { id:'6', name_ar:'كيبورد بلوتوث أبل',      barcode:'4901234567895', sku:'APL-KB-BT',  selling_price:480,  unit:'قطعة' },
-  { id:'7', name_ar:'سماعات سوني WH-1000',    barcode:'4901234567896', sku:'SNY-WH-1000', selling_price:1100, unit:'قطعة' },
-  { id:'8', name_ar:'كاميرا ويب Logitech C920',barcode:'4901234567897', sku:'LOG-C920',   selling_price:380,  unit:'قطعة' },
-]
 
 function BarcodePreview({ barcode, type, name, price, size }: { barcode: string; type: BarcodeType; name: string; price: number; size: LabelSize }) {
   const cfg = LABEL_SIZES[size]
@@ -68,12 +58,12 @@ export default function ProductBarcodesPage() {
   const [showSku, setShowSku] = useState(false)
   const [previewProduct, setPreviewProduct] = useState<any>(null)
 
-  const { data: products = MOCK_PRODUCTS } = useQuery({
+  const { data: products = [] } = useQuery({
     queryKey: ['products-barcodes', user?.company_id],
     queryFn: async () => {
       const { data } = await supabase.from('products').select('id,name_ar,barcode,sku,selling_price,unit')
         .eq('company_id', user!.company_id).eq('is_active', true).limit(100)
-      return data?.length ? data : MOCK_PRODUCTS
+      return data || []
     },
     enabled: !!user
   })
@@ -126,7 +116,7 @@ export default function ProductBarcodesPage() {
             <button onClick={() => toast.success('جاري تصدير الملصقات...')} className="btn-outline gap-1.5">
               <Download className="w-4 h-4" />تصدير PDF
             </button>
-            <button onClick={handlePrint} className="btn-primary gap-1.5">
+            <button type="button" onClick={handlePrint} className="btn-primary gap-1.5">
               <Printer className="w-4 h-4" />طباعة ({totalLabels} ملصق)
             </button>
           </>
@@ -282,7 +272,7 @@ export default function ProductBarcodesPage() {
                   <span className="font-bold">{barcodeType === 'barcode' ? 'باركود' : 'QR كود'}</span>
                 </div>
               </div>
-              <button onClick={handlePrint} className="btn-primary w-full gap-2 mt-4">
+              <button type="button" onClick={handlePrint} className="btn-primary w-full gap-2 mt-4">
                 <Printer className="w-4 h-4" />طباعة {totalLabels} ملصق
               </button>
             </div>

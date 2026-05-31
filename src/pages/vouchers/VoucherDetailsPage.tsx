@@ -61,7 +61,7 @@ export default function VoucherDetailsPage() {
             <button onClick={() => navigate('/vouchers')} className="btn-outline gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold">
               <ArrowRight className="w-4 h-4 ml-1" />رجوع للوحة السندات
             </button>
-            <button onClick={handlePrint} className="btn-primary gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-md active:scale-[0.97] transition-all">
+            <button type="button" onClick={handlePrint} className="btn-primary gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-md active:scale-[0.97] transition-all">
               <Printer className="w-4 h-4" />طباعة السند
             </button>
           </div>

@@ -7,35 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import PageHeader from '@/components/shared/PageHeader'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
-const MOCK_PRODUCT = {
-  id: '1', name_ar: 'لابتوب Dell Inspiron 15', name_en: 'Dell Inspiron 15', barcode: '4901234567890',
-  sku: 'DELL-INS-15', category: 'أجهزة الحاسب', unit: 'قطعة',
-  cost_price: 3200, selling_price: 4500, min_price: 3800, wholesale_price: 4000,
-  current_stock: 28, min_stock: 5, max_stock: 50, reorder_point: 10,
-  is_active: true, has_expiry: false, track_serial: false,
-  description: 'لابتوب Dell Inspiron بمعالج Intel Core i5 الجيل الحادي عشر، ذاكرة 8GB، تخزين 512GB SSD',
-  image: null, vat_rate: 15, weight: 2.1, dimensions: '35×24×2 سم',
-  supplier: 'شركة Dell الشرق الأوسط', created_at: '2024-01-15',
-}
-
-const MOCK_WAREHOUSES = [
-  { name: 'المستودع الرئيسي', qty: 20, reserved: 3, available: 17 },
-  { name: 'مستودع الفرع', qty: 8, reserved: 1, available: 7 },
-]
-
-const MOCK_MOVEMENTS = [
-  { date:'2026-05-28', type:'sale', ref:'INV-2026-045', qty:-2, balance:28, note:'فاتورة بيع' },
-  { date:'2026-05-25', type:'purchase', ref:'PUR-2026-018', qty:10, balance:30, note:'فاتورة شراء' },
-  { date:'2026-05-20', type:'sale', ref:'INV-2026-041', qty:-3, balance:20, note:'فاتورة بيع' },
-  { date:'2026-05-15', type:'sale', ref:'INV-2026-038', qty:-1, balance:23, note:'فاتورة بيع' },
-  { date:'2026-05-10', type:'adjustment', ref:'ADJ-2026-003', qty:2, balance:24, note:'تسوية مخزون' },
-  { date:'2026-05-01', type:'purchase', ref:'PUR-2026-012', qty:15, balance:22, note:'فاتورة شراء' },
-]
-
-const STOCK_TREND = [
-  { date:'1 مايو', stock:22 }, { date:'10 مايو', stock:24 }, { date:'15 مايو', stock:23 },
-  { date:'20 مايو', stock:20 }, { date:'25 مايو', stock:30 }, { date:'28 مايو', stock:28 },
-]
+const STOCK_TREND: { date: string; stock: number }[] = []
 
 const MOVEMENT_CFG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   sale:       { label:'بيع',      color:'text-red-500',    icon:ShoppingCart },
@@ -50,21 +22,25 @@ export default function ProductDetailsPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
 
-  const { data: product = MOCK_PRODUCT, isLoading } = useQuery({
+  const { data: product, isLoading } = useQuery({
     queryKey: ['product', id],
     queryFn: async () => {
       const { data } = await supabase.from('products').select('*, category:categories(name_ar)')
         .eq('id', id!).eq('company_id', user!.company_id).single()
-      return data || MOCK_PRODUCT
+      return data || null
     },
     enabled: !!id && !!user
   })
 
+  const movements: { date: string; type: string; ref: string; qty: number; balance: number; note: string }[] = []
+  const warehouses: { name: string; qty: number; reserved: number; available: number }[] = []
+
+  if (isLoading) return <div className="space-y-4">{[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-muted rounded-2xl animate-pulse" />)}</div>
+  if (!product) return <div className="text-center py-20 text-muted-foreground"><Package className="w-10 h-10 mx-auto mb-3 opacity-30" /><p>لم يتم العثور على المنتج</p></div>
+
   const margin = Math.round(((product.selling_price - product.cost_price) / product.selling_price) * 100)
   const isLowStock = product.current_stock <= product.min_stock
   const isOverStock = product.current_stock >= product.max_stock
-
-  if (isLoading) return <div className="space-y-4">{[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-muted rounded-2xl animate-pulse" />)}</div>
 
   return (
     <div className="space-y-5">
@@ -144,7 +120,7 @@ export default function ProductDetailsPage() {
               <Warehouse className="w-4 h-4 text-primary" />توزيع المخزون بالمستودعات
             </h3>
             <div className="space-y-3">
-              {MOCK_WAREHOUSES.map((wh, i) => (
+              {warehouses.map((wh, i) => (
                 <div key={i} className="flex items-center gap-4 p-3 bg-muted/30 rounded-xl">
                   <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center text-primary shrink-0">
                     <Warehouse className="w-4 h-4" />
@@ -183,7 +159,7 @@ export default function ProductDetailsPage() {
                 </tr>
               </thead>
               <tbody>
-                {MOCK_MOVEMENTS.map((mv, i) => {
+                {movements.map((mv, i) => {
                   const cfg = MOVEMENT_CFG[mv.type] || MOVEMENT_CFG.adjustment
                   const Icon = cfg.icon
                   return (
@@ -220,7 +196,7 @@ export default function ProductDetailsPage() {
                 { label:'الوحدة', value: product.unit },
                 { label:'الباركود', value: product.barcode },
                 { label:'رمز المنتج', value: product.sku },
-                { label:'المورد', value: MOCK_PRODUCT.supplier },
+                { label:'المورد', value: product.supplier },
                 { label:'تاريخ الإضافة', value: formatDate(product.created_at) },
               ].map(f => f.value && (
                 <div key={f.label} className="flex justify-between">
@@ -237,8 +213,8 @@ export default function ProductDetailsPage() {
             <div className="space-y-2.5 text-sm">
               {[
                 { label:'سعر البيع', value:formatCurrency(product.selling_price), color:'text-emerald-600' },
-                { label:'أدنى سعر', value:formatCurrency(MOCK_PRODUCT.min_price), color:'text-amber-600' },
-                { label:'سعر الجملة', value:formatCurrency(MOCK_PRODUCT.wholesale_price), color:'text-blue-600' },
+                { label:'أدنى سعر', value:formatCurrency(product.min_price), color:'text-amber-600' },
+                { label:'سعر الجملة', value:formatCurrency(product.wholesale_price), color:'text-blue-600' },
                 { label:'سعر التكلفة', value:formatCurrency(product.cost_price), color:'text-foreground' },
               ].map(f => (
                 <div key={f.label} className="flex justify-between">
@@ -259,7 +235,7 @@ export default function ProductDetailsPage() {
             <div className="space-y-2.5 text-sm">
               {[
                 { label:'الحد الأدنى', value:product.min_stock, color:'text-red-500' },
-                { label:'نقطة إعادة الطلب', value:MOCK_PRODUCT.reorder_point, color:'text-amber-600' },
+                { label:'نقطة إعادة الطلب', value:product.reorder_point, color:'text-amber-600' },
                 { label:'الحد الأقصى', value:product.max_stock, color:'text-emerald-600' },
               ].map(f => (
                 <div key={f.label} className="flex justify-between">

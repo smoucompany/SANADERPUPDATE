@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+﻿import { useState } from 'react'
+import { useParams, Navigate } from 'react-router-dom'
 import { Lock, Activity, Shield, Clock, Save } from 'lucide-react'
 import { SectionCard, SettingRow, Toggle } from './shared'
 import toast from 'react-hot-toast'
@@ -114,5 +114,5 @@ export default function UsersSettings() {
     </div>
   )
 
-  return null
+  return <Navigate to="/settings/users/list" replace />
 }

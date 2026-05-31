@@ -4,6 +4,7 @@ import { BookOpen, Calendar, Download, Search, FileText, ArrowRight, Printer, Ar
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import PageHeader from '@/components/shared/PageHeader'
+import { PrintAccountingHeader, PrintAccountingFooter } from '@/components/print/PrintAccountingHeader'
 import { formatCurrency, formatDate, today } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as XLSX from 'xlsx'
@@ -195,33 +196,19 @@ export default function GeneralLedgerPage() {
 
   return (
     <div className="space-y-6">
-      {/* ── PRINT ONLY REPORT HEADER ── */}
+      {/* ── PRINT HEADER ── */}
       {selectedAccount && (
-        <div className="print-only mb-6" dir="rtl">
-          <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-4">
-            <div>
-              <h2 className="text-xl font-black text-black">مؤسسة سند للحلول التقنية</h2>
-              <p className="text-xs text-muted-foreground mt-1">قسم الحسابات العامة والسجلات</p>
-              <p className="text-[10px] text-muted-foreground">الرقم الضريبي: 300123456700003</p>
-            </div>
-            <div className="text-left" dir="ltr">
-              <h2 className="text-lg font-black text-black">SANAD SYSTEMS</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">General Ledger Statement</p>
-              <p className="text-[10px] text-muted-foreground">Date: {formatDate(today())}</p>
-            </div>
-          </div>
-          <div className="text-center my-6">
-            <h1 className="text-2xl font-black text-black border-2 border-black py-2 bg-slate-50">
-              كشف تفصيلي لدفتر الأستاذ العام
-            </h1>
-            <p className="text-xs text-black mt-2 font-bold">
-              الحساب: {selectedAccount.code} — {selectedAccount.name_ar}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1 font-medium">
-              للفترة الممتدة من {formatDate(dateFrom)} إلى {formatDate(dateTo)}
-            </p>
-          </div>
-        </div>
+        <PrintAccountingHeader
+          reportTitle="كشف تفصيلي لدفتر الأستاذ العام"
+          reportTitleEn="GENERAL LEDGER STATEMENT"
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          subtitle={`${selectedAccount.code} — ${selectedAccount.name_ar}`}
+          extraMeta={[
+            { label: 'الرصيد الافتتاحي', value: formatCurrency(beginningBalance) },
+            { label: 'الرصيد الختامي', value: formatCurrency(endingBalance) },
+          ]}
+        />
       )}
 
       {/* Page Header */}
@@ -232,7 +219,7 @@ export default function GeneralLedgerPage() {
           actions={
             selectedAccountId && (
               <div className="flex gap-2">
-                <button onClick={handlePrint} className="btn-outline gap-1.5 border-border hover:bg-muted text-foreground cursor-pointer">
+                <button type="button" onClick={handlePrint} className="btn-outline gap-1.5 border-border hover:bg-muted text-foreground cursor-pointer">
                   <Printer className="w-4 h-4" /> طباعة الكشف
                 </button>
                 <button onClick={handleExport} className="btn-primary gap-1.5 bg-primary text-white hover:brightness-110 cursor-pointer">
@@ -492,6 +479,9 @@ export default function GeneralLedgerPage() {
           </div>
         )}
       </div>
+
+      {/* ── PRINT FOOTER ── */}
+      <PrintAccountingFooter pageNote="دفتر الأستاذ العام — وثيقة سرية" />
     </div>
   )
 }

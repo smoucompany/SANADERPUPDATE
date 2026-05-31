@@ -20,7 +20,24 @@
       "PowerShell(npm list playwright --prefix d:\\\\65 2>&1)",
       "PowerShell(npm install -g playwright 2>&1)",
       "PowerShell(npx playwright install chromium 2>&1)",
-      "PowerShell(Get-Content \"d:\\\\65\\\\.env\" | Where-Object { $_ -notmatch \"SECRET|KEY\" } | Select-Object -First 10)"
+      "PowerShell(Get-Content \"d:\\\\65\\\\.env\" | Where-Object { $_ -notmatch \"SECRET|KEY\" } | Select-Object -First 10)",
+      "PowerShell(cd d:\\\\65; \\(Get-Content \"src\\\\pages\\\\accounting\\\\FinancialStatementsPage.tsx\" | Measure-Object -Line\\).Lines)",
+      "PowerShell(Get-Item \"d:\\\\65\\\\releases\\\\erp-update-v1.0.0.zip\" | Select-Object Name, @{N=\"Size\";E={[math]::Round\\($_.Length/1KB\\)+\"KB\"}}, LastWriteTime)",
+      "PowerShell($size = [math]::Round\\(\\(Get-Item \"d:\\\\65\\\\releases\\\\erp-update-v1.0.0.zip\"\\).Length / 1MB, 2\\); Write-Host \"Size: $size MB\")",
+      "PowerShell(Start-Process explorer.exe \"d:\\\\65\\\\releases\")",
+      "PowerShell(npm install -g vercel 2>&1)",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"d:\\\\65\\\\external-update-publisher\\\\api\")",
+      "PowerShell(Start-Process \"https://vercel.com/mostafas-projects-c4d0937e/erp-update-publisher/stores\")",
+      "Bash(Get-ChildItem -Path \"d:\\\\65\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(cd /d \"d:\\\\65\")",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(Get-ChildItem -Path \"d:\\\\65\" -Force)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

@@ -99,6 +99,25 @@ const AccountingPeriodsPage = lazy(() => import('@/pages/accounting/AccountingPe
 const NotificationsPage = lazy(() => import('@/pages/NotificationsPage'))
 // Reports
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'))
+// New: Purchases
+const DeletedPurchasesPage = lazy(() => import('@/pages/purchases/DeletedPurchasesPage'))
+// New: Supplier Statement
+const SupplierStatementPage = lazy(() => import('@/pages/suppliers/SupplierStatementPage'))
+// New: Cashbox
+const CashboxesPage = lazy(() => import('@/pages/cashbox/CashboxesPage'))
+const CashboxTransfersPage = lazy(() => import('@/pages/cashbox/CashboxTransfersPage'))
+const CashboxMovementsPage = lazy(() => import('@/pages/cashbox/CashboxMovementsPage'))
+// New: Bank
+const BankDepositsPage = lazy(() => import('@/pages/accounting/BankDepositsPage'))
+const BankWithdrawalsPage = lazy(() => import('@/pages/accounting/BankWithdrawalsPage'))
+// New: Warehouse
+const Warehouse1Page = lazy(() => import('@/pages/inventory/Warehouse1Page'))
+const WarehouseTransferPage = lazy(() => import('@/pages/inventory/WarehouseTransferPage'))
+// New: Recipes
+const RecipesPage = lazy(() => import('@/pages/restaurant/RecipesPage'))
+// New: Permissions + Audit
+const PermissionsPage = lazy(() => import('@/pages/settings/PermissionsPage'))
+const AuditLogPage = lazy(() => import('@/pages/settings/AuditLogPage'))
 // Settings
 const UsersPage = lazy(() => import('@/pages/settings/UsersPage'))
 const SettingsLayout = lazy(() => import('@/pages/settings/SettingsLayout'))
@@ -160,23 +179,49 @@ export default function App() {
   useEffect(() => {
     if (!remoteUpdateUrl) return
 
+    const STORAGE_KEY = 'erp_last_update_notified'
+
     const checkExternalUpdate = async () => {
       try {
         const response = await fetch(remoteUpdateUrl, { cache: 'no-store' })
         if (!response.ok) return
         const data = await response.json()
-        if (data.version && data.version !== currentVersion) {
-          toast(
-            `يتوفر تحديث جديد ${data.version}. افتح الإعدادات > تحديث النظام لمتابعة التحديث.`,
-            { icon: '⬆️', duration: 10000 }
-          )
-        }
+        if (!data.version || data.version === currentVersion) return
+
+        // Don't spam — notify once per remote version per session
+        const alreadyNotified = sessionStorage.getItem(STORAGE_KEY)
+        if (alreadyNotified === data.version) return
+        sessionStorage.setItem(STORAGE_KEY, data.version)
+
+        const notes = data.notes ? `\n${data.notes}` : ''
+        toast(
+          `⬆️ يتوفر تحديث جديد للنظام\nالإصدار الحالي: ${currentVersion}  ←  الإصدار الجديد: ${data.version}${notes}`,
+          {
+            duration: 15000,
+            style: {
+              background: '#0d1b2a',
+              color: '#ffffff',
+              border: '1px solid #b8934a',
+              direction: 'rtl',
+              textAlign: 'right',
+              fontWeight: '600',
+              maxWidth: '420px',
+              whiteSpace: 'pre-line',
+            },
+            icon: null,
+          }
+        )
       } catch {
-        // Ignore external update check failures silently.
+        // Ignore silently — update server may be offline
       }
     }
 
+    // Check on load
     checkExternalUpdate()
+
+    // Then check every 30 minutes
+    const interval = setInterval(checkExternalUpdate, 30 * 60 * 1000)
+    return () => clearInterval(interval)
   }, [remoteUpdateUrl, currentVersion])
 
   return (
@@ -220,6 +265,7 @@ export default function App() {
             <Route path="purchases/new" element={<PurchaseFormPage />} />
             <Route path="purchases/returns" element={<PurchaseReturnsPage />} />
             <Route path="purchases/orders" element={<PurchaseOrdersPage />} />
+            <Route path="purchases/deleted" element={<DeletedPurchasesPage />} />
             <Route path="purchases/:id/edit" element={<PurchaseFormPage />} />
             <Route path="purchases/:id" element={<PurchaseDetailsPage />} />
 
@@ -231,6 +277,8 @@ export default function App() {
             <Route path="products/:id" element={<ProductDetailsPage />} />
             <Route path="inventory" element={<InventoryPage />} />
             <Route path="inventory/transfer" element={<StockTransferPage />} />
+            <Route path="inventory/warehouse1" element={<Warehouse1Page />} />
+            <Route path="inventory/warehouse-transfer" element={<WarehouseTransferPage />} />
             <Route path="inventory/adjustment" element={<StockAdjustmentPage />} />
             <Route path="inventory/alerts" element={<LowStockAlertsPage />} />
             <Route path="price-lists" element={<PriceListsPage />} />
@@ -248,6 +296,7 @@ export default function App() {
             <Route path="suppliers/payments" element={<SupplierPaymentsPage />} />
             <Route path="suppliers/reports" element={<SupplierReportsPage />} />
             <Route path="suppliers/statements" element={<SupplierStatementsPage />} />
+            <Route path="suppliers/:id/statement" element={<SupplierStatementPage />} />
             <Route path="suppliers/:id" element={<SupplierAccountPage />} />
             <Route path="suppliers/:id/edit" element={<SupplierFormPage />} />
 
@@ -262,6 +311,8 @@ export default function App() {
             <Route path="payments" element={<PaymentsPage />} />
             <Route path="bank-accounts" element={<BankAccountsPage />} />
             <Route path="bank-accounts/:id" element={<BankTransactionsPage />} />
+            <Route path="bank/deposits" element={<BankDepositsPage />} />
+            <Route path="bank/withdrawals" element={<BankWithdrawalsPage />} />
             <Route path="cost-centers" element={<CostCentersPage />} />
             <Route path="assets" element={<AssetsPage />} />
             <Route path="assets/:id" element={<AssetDetailsPage />} />
@@ -297,12 +348,24 @@ export default function App() {
             <Route path="crm/leads" element={<CRMLeadsPage />} />
             <Route path="crm/activities" element={<CRMActivitiesPage />} />
 
+            {/* Cashbox */}
+            <Route path="cashbox" element={<CashboxesPage />} />
+            <Route path="cashbox/transfers" element={<CashboxTransfersPage />} />
+            <Route path="cashbox/movements" element={<CashboxMovementsPage />} />
+
+            {/* Restaurant / Recipes */}
+            <Route path="recipes" element={<RecipesPage />} />
+
             {/* Profile */}
             <Route path="profile" element={<ProfilePage />} />
             <Route path="notifications" element={<NotificationsPage />} />
 
             {/* Reports */}
             <Route path="reports" element={<ReportsPage />} />
+
+            {/* Permissions & Audit */}
+            <Route path="permissions" element={<PermissionsPage />} />
+            <Route path="audit-log" element={<AuditLogPage />} />
 
             {/* Settings */}
             <Route path="settings" element={<SettingsLayout />}>

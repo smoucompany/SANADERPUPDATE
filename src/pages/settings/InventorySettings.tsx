@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+﻿import { useState } from 'react'
+import { useParams, Navigate } from 'react-router-dom'
 import { Boxes, AlertTriangle, Bell, Hash, Tag, Package, Warehouse, Save, Loader2, Edit2, Trash2, Zap } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
@@ -325,5 +325,5 @@ export default function InventorySettings() {
     </div>
   )
 
-  return null
+  return <Navigate to="/settings/inventory/warehouses" replace />
 }

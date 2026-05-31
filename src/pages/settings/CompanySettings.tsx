@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Navigate } from 'react-router-dom'
 import { Building2, DollarSign, FileText, MapPin, Phone, AtSign, Link2, Percent, Save, Loader2, Globe, Calendar, Upload, X, ImageIcon } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { SectionCard } from './shared'
+import { useModuleSettings } from '@/hooks/useModuleSettings'
 import toast from 'react-hot-toast'
 
 export default function CompanySettings() {
@@ -14,6 +15,15 @@ export default function CompanySettings() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoPreview, setLogoPreview] = useState<string>(company?.logo_url || '')
+
+  // Persistent locale & fiscal settings
+  const { settings: locale, save: saveLocale, isSaving: savingLocale } = useModuleSettings('company_locale', {
+    timezone: 'Asia/Riyadh', language: 'ar', date_format: 'DD/MM/YYYY',
+    time_format: '12', calendar: 'gregorian', week_start: '0',
+  })
+  const { settings: fiscal, save: saveFiscal, isSaving: savingFiscal } = useModuleSettings('company_fiscal', {
+    fiscal_start: '', fiscal_end: '', fiscal_month: '1',
+  })
 
   const [form, setForm] = useState({
     name_ar:        company?.name_ar        || '',
@@ -95,7 +105,11 @@ export default function CompanySettings() {
       const { error } = await supabase.from('companies').update(form).eq('id', company!.id)
       if (error) throw error
     },
-    onSuccess: () => { toast.success('تم حفظ إعدادات الشركة'); qc.invalidateQueries() },
+    onSuccess: () => {
+      setCompany({ ...company!, ...form })
+      toast.success('تم حفظ إعدادات الشركة')
+      qc.invalidateQueries()
+    },
     onError: (e: Error) => toast.error(e.message)
   })
 
@@ -267,7 +281,7 @@ export default function CompanySettings() {
         <div className="py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="form-label">المنطقة الزمنية</label>
-            <select className="form-select">
+            <select value={locale.timezone} onChange={e => saveLocale({ timezone: e.target.value }, true)} className="form-select">
               <option value="Asia/Riyadh">توقيت الرياض (GMT+3)</option>
               <option value="Asia/Dubai">توقيت دبي (GMT+4)</option>
               <option value="Africa/Cairo">توقيت القاهرة (GMT+2)</option>
@@ -278,14 +292,14 @@ export default function CompanySettings() {
           </div>
           <div>
             <label className="form-label">لغة الواجهة</label>
-            <select className="form-select">
+            <select value={locale.language} onChange={e => saveLocale({ language: e.target.value }, true)} className="form-select">
               <option value="ar">العربية</option>
               <option value="en">English</option>
             </select>
           </div>
           <div>
             <label className="form-label">تنسيق التاريخ</label>
-            <select className="form-select" dir="ltr">
+            <select value={locale.date_format} onChange={e => saveLocale({ date_format: e.target.value }, true)} className="form-select" dir="ltr">
               <option value="DD/MM/YYYY">DD/MM/YYYY</option>
               <option value="MM/DD/YYYY">MM/DD/YYYY</option>
               <option value="YYYY-MM-DD">YYYY-MM-DD</option>
@@ -293,14 +307,14 @@ export default function CompanySettings() {
           </div>
           <div>
             <label className="form-label">تنسيق الوقت</label>
-            <select className="form-select" dir="ltr">
+            <select value={locale.time_format} onChange={e => saveLocale({ time_format: e.target.value }, true)} className="form-select" dir="ltr">
               <option value="12">12 ساعة (AM/PM)</option>
               <option value="24">24 ساعة</option>
             </select>
           </div>
           <div>
             <label className="form-label">نوع التقويم</label>
-            <select className="form-select">
+            <select value={locale.calendar} onChange={e => saveLocale({ calendar: e.target.value }, true)} className="form-select">
               <option value="gregorian">ميلادي</option>
               <option value="hijri">هجري</option>
               <option value="both">الاثنان</option>
@@ -308,7 +322,7 @@ export default function CompanySettings() {
           </div>
           <div>
             <label className="form-label">أول يوم في الأسبوع</label>
-            <select className="form-select">
+            <select value={locale.week_start} onChange={e => saveLocale({ week_start: e.target.value }, true)} className="form-select">
               <option value="0">الأحد</option>
               <option value="6">السبت</option>
               <option value="1">الاثنين</option>
@@ -317,8 +331,9 @@ export default function CompanySettings() {
         </div>
       </SectionCard>
       <div className="flex justify-end">
-        <button onClick={() => toast.success('تم حفظ إعدادات المنطقة الزمنية')} className="btn-primary gap-2">
-          <Save className="w-4 h-4" />حفظ التغييرات
+        <button onClick={() => saveLocale({})} disabled={savingLocale} className="btn-primary gap-2">
+          {savingLocale ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          حفظ التغييرات
         </button>
       </div>
     </div>
@@ -330,15 +345,15 @@ export default function CompanySettings() {
         <div className="py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="form-label">بداية السنة المالية</label>
-            <input type="date" className="form-input" dir="ltr" defaultValue="2025-01-01" />
+            <input type="date" value={fiscal.fiscal_start} onChange={e => saveFiscal({ fiscal_start: e.target.value }, true)} className="form-input" dir="ltr" />
           </div>
           <div>
             <label className="form-label">نهاية السنة المالية</label>
-            <input type="date" className="form-input" dir="ltr" defaultValue="2025-12-31" />
+            <input type="date" value={fiscal.fiscal_end} onChange={e => saveFiscal({ fiscal_end: e.target.value }, true)} className="form-input" dir="ltr" />
           </div>
           <div>
             <label className="form-label">الشهر الأول للسنة المالية</label>
-            <select className="form-select">
+            <select value={fiscal.fiscal_month} onChange={e => saveFiscal({ fiscal_month: e.target.value }, true)} className="form-select">
               {['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
                 .map((m, i) => <option key={i} value={i+1}>{m}</option>)}
             </select>
@@ -353,12 +368,13 @@ export default function CompanySettings() {
         </div>
       </SectionCard>
       <div className="flex justify-end">
-        <button onClick={() => toast.success('تم حفظ السنة المالية')} className="btn-primary gap-2">
-          <Save className="w-4 h-4" />حفظ التغييرات
+        <button onClick={() => saveFiscal({})} disabled={savingFiscal} className="btn-primary gap-2">
+          {savingFiscal ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          حفظ التغييرات
         </button>
       </div>
     </div>
   )
 
-  return null
+  return <Navigate to="/settings/company/info" replace />
 }

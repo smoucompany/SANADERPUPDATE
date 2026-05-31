@@ -90,7 +90,7 @@ export default function CustomerAccountPage() {
             })), `كشف-حساب-${customer?.name_ar}`)} className="btn-outline gap-1.5">
               <Download className="w-4 h-4" />تصدير Excel
             </button>
-            <button onClick={() => window.print()} className="btn-primary gap-1.5">
+            <button type="button" onClick={() => window.print()} className="btn-primary gap-1.5">
               <Printer className="w-4 h-4" />طباعة الكشف
             </button>
           </>

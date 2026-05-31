@@ -1,8 +1,12 @@
 import { useState } from 'react'
-import { Plus, Phone, Mail, MessageSquare, Users, Calendar, CheckCircle2, Clock, Filter, Search } from 'lucide-react'
+import { Plus, Phone, Mail, MessageSquare, Users, Calendar, CheckCircle2, Clock, Search, Loader2, Save, Trash2 } from 'lucide-react'
+import { useActivities, useCreateActivity } from '@/hooks/useCRM'
+import { useQueryClient } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
 import { formatDate } from '@/lib/utils'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import toast from 'react-hot-toast'
 
 type ActivityType = 'call' | 'whatsapp' | 'email' | 'meeting' | 'task'
@@ -37,16 +41,6 @@ const OUTCOME_CFG: Record<ActivityOutcome, { label: string; color: string }> = {
   done:     { label: 'مكتمل',    color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30' },
 }
 
-const MOCK: Activity[] = [
-  { id:'1', type:'call', customer:'شركة الأفق', contact:'خالد المدير', note:'متابعة عرض السعر المُرسَل - مهتم جداً', outcome:'positive', date:'2026-05-28', time:'10:15', assigned_to:'أحمد العمري', duration:'15 دقيقة' },
-  { id:'2', type:'whatsapp', customer:'مجموعة المستقبل', contact:'نورة السالم', note:'إرسال كتالوج المنتجات والعروض الجديدة', outcome:'waiting', date:'2026-05-28', time:'11:30', assigned_to:'سارة الأحمدي' },
-  { id:'3', type:'meeting', customer:'مؤسسة النور', contact:'فهد المدير', note:'اجتماع تقديم حل ERP المتكامل', outcome:'positive', date:'2026-05-27', time:'14:00', assigned_to:'أحمد العمري', duration:'90 دقيقة' },
-  { id:'4', type:'email', customer:'شركة الحربي', contact:'ريم الحربي', note:'إرسال عرض السعر التفصيلي', outcome:'waiting', date:'2026-05-27', time:'09:00', assigned_to:'سارة الأحمدي' },
-  { id:'5', type:'call', customer:'مؤسسة القحطاني', contact:'عمر القحطاني', note:'مناقشة تفاصيل العقد والشروط', outcome:'positive', date:'2026-05-26', time:'16:00', assigned_to:'أحمد العمري', duration:'30 دقيقة' },
-  { id:'6', type:'task', customer:'شركة الأفق', contact:'خالد المدير', note:'إعداد العرض التقني المفصّل', outcome:'done', date:'2026-05-25', time:'08:00', assigned_to:'أحمد العمري' },
-  { id:'7', type:'whatsapp', customer:'مؤسسة الوطن', contact:'أحمد الوطن', note:'رد على استفسارات العميل', outcome:'negative', date:'2026-05-24', time:'13:45', assigned_to:'سارة الأحمدي' },
-  { id:'8', type:'meeting', customer:'مجموعة الخليج', contact:'سعد الخليج', note:'أول لقاء تعريفي بالمنتج', outcome:'positive', date:'2026-05-23', time:'10:00', assigned_to:'أحمد العمري', duration:'60 دقيقة' },
-]
 
 const EMPTY_FORM = {
   type: 'call' as ActivityType, customer: '', contact: '', note: '',
@@ -54,16 +48,30 @@ const EMPTY_FORM = {
 }
 
 export default function CRMActivitiesPage() {
-  const [activities, setActivities] = useState<Activity[]>(MOCK)
+  const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<ActivityType | ''>('')
   const [filterOutcome, setFilterOutcome] = useState<ActivityOutcome | ''>('')
   const [form, setForm] = useState(EMPTY_FORM)
-  const [saving, setSaving] = useState(false)
+
+  const { data: rawActivities = [], isLoading } = useActivities({
+    type: filterType || undefined,
+  })
+  const createActivity = useCreateActivity()
+
+  const activities: Activity[] = rawActivities.map((a: any) => ({
+    id: a.id, type: a.type as ActivityType, customer: a.customer_name || a.lead?.name || '',
+    contact: a.contact_name || '', note: a.notes || a.description || '',
+    outcome: (a.outcome || 'pending') as ActivityOutcome,
+    date: a.activity_date || a.created_at?.slice(0,10) || '',
+    time: a.activity_time || '', assigned_to: a.assigned_to || '',
+    duration: a.duration || '',
+  }))
 
   const filtered = activities.filter(a =>
-    (!search || a.customer.includes(search) || a.note.includes(search)) &&
+    (!search || a.customer.toLowerCase().includes(search.toLowerCase()) || a.note.toLowerCase().includes(search.toLowerCase())) &&
     (!filterType || a.type === filterType) &&
     (!filterOutcome || a.outcome === filterOutcome)
   )
@@ -75,14 +83,23 @@ export default function CRMActivitiesPage() {
 
   const handleSubmit = async () => {
     if (!form.customer || !form.note || !form.date) { toast.error('العميل والملاحظة والتاريخ مطلوبة'); return }
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 600))
-    const newActivity: Activity = { id: String(Date.now()), ...form }
-    setActivities(p => [newActivity, ...p])
-    setSaving(false)
-    toast.success('تم تسجيل النشاط بنجاح')
+    await createActivity.mutateAsync({
+      type: form.type, customer_name: form.customer, contact_name: form.contact,
+      notes: form.note, outcome: form.outcome,
+      activity_date: form.date, activity_time: form.time,
+      assigned_to: form.assigned_to, duration: form.duration,
+    })
     setShowForm(false)
     setForm(EMPTY_FORM)
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    const { error } = await supabase.from('crm_activities').delete().eq('id', deleteId)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['activities'] })
+    toast.success('تم حذف النشاط')
+    setDeleteId(null)
   }
 
   return (
@@ -98,6 +115,8 @@ export default function CRMActivitiesPage() {
       />
 
       {/* Type Stats */}
+      {isLoading && <div className="flex justify-center py-6"><Loader2 className="w-7 h-7 animate-spin text-primary" /></div>}
+
       <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
         {Object.entries(TYPE_CFG).map(([type, cfg]) => {
           const Icon = cfg.icon
@@ -174,6 +193,10 @@ export default function CRMActivitiesPage() {
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${outcomeCfg.color}`}>
                           {outcomeCfg.label}
                         </span>
+                        <button onClick={() => setDeleteId(activity.id)}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
@@ -248,13 +271,21 @@ export default function CRMActivitiesPage() {
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <button onClick={() => setShowForm(false)} className="btn-outline">إلغاء</button>
-            <button onClick={handleSubmit} disabled={saving} className="btn-primary gap-2">
-              {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
+            <button onClick={handleSubmit} disabled={createActivity.isPending} className="btn-primary gap-2">
+              {createActivity.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               تسجيل النشاط
             </button>
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!deleteId}
+        title="حذف النشاط"
+        message="هل أنت متأكد من حذف هذا النشاط؟"
+        onCancel={() => setDeleteId(null)}
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Plus, Trash2, Save, ArrowRight, Loader2 } from 'lucide-react'
-import { useCreatePurchase, useUpdatePurchase, usePurchase } from '@/hooks/usePurchases'
-import { useProducts } from '@/hooks/useProducts'
-import { useSuppliers } from '@/hooks/useSuppliers'
-import { useWarehouses } from '@/hooks/useWarehouses'
+import {
+  Plus, Trash2, Save, ArrowRight, Loader2,
+  Lock, AlertCircle, Calendar, Package, ChevronDown, Search
+} from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
-import { formatCurrency, calculateVat, today } from '@/lib/utils'
+import { formatCurrency, today } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 
 interface LineItem {
   _id: string
@@ -20,246 +21,639 @@ interface LineItem {
   vat_rate: number
   vat_amount: number
   total: number
+  expiry_date?: string
+  batch_number?: string
+  unit_name?: string
+}
+
+const PAYMENT_METHODS = [
+  { value: 'cash',     label: 'نقدي (خزينة رئيسية)', icon: '💵' },
+  { value: 'mada',     label: 'بطاقة / فيزا',         icon: '💳' },
+  { value: 'transfer', label: 'تحويل بنكي',           icon: '🏦' },
+  { value: 'deferred', label: 'آجل (ذمة مورد)',       icon: '📋' },
+]
+
+function calcLine(item: LineItem): LineItem {
+  const base   = item.quantity * item.unit_price - item.discount_amount
+  const vatAmt = base * (item.vat_rate / 100)
+  return { ...item, vat_amount: vatAmt, total: base + vatAmt }
 }
 
 export default function PurchaseFormPage() {
   const navigate = useNavigate()
-  const { id } = useParams()
-  const isEdit = !!id
+  const { id }   = useParams()
+  const isEdit   = !!id
 
-  const { data: existingPurchase } = usePurchase(id)
-  const createPurchase = useCreatePurchase()
-  const updatePurchase = useUpdatePurchase()
-  const { data: products = [] } = useProducts({ is_active: true })
-  const { data: suppliers = [] } = useSuppliers()
-  const { data: warehouses = [] } = useWarehouses()
-  const { company } = useAuthStore()
+  const { company, user } = useAuthStore()
 
-  const [supplierId, setSupplierId] = useState('')
-  const [warehouseId, setWarehouseId] = useState('')
-  const [purchaseDate, setPurchaseDate] = useState(today())
-  const [dueDate, setDueDate] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('cash')
-  const [notes, setNotes] = useState('')
+  const [supplierId, setSupplierId]         = useState('')
+  const [supplierName, setSupplierName]     = useState('')
+  const [purchaseDate, setPurchaseDate]     = useState(today())
+  const [dueDate, setDueDate]               = useState('')
+  const [paymentMethod, setPaymentMethod]   = useState('cash')
+  const [bankAccountId, setBankAccountId]   = useState('')
+  const [notes, setNotes]                   = useState('')
+  const [purchaseNumber, setPurchaseNumber] = useState('')
+  const [isLocked, setIsLocked]             = useState(false)
+  const [saving, setSaving]                 = useState(false)
+
   const [items, setItems] = useState<LineItem[]>([{
-    _id: '1', product_name: '', quantity: 1, unit_price: 0,
+    _id: Date.now().toString(), product_name: '', quantity: 1, unit_price: 0,
     discount_amount: 0, vat_rate: company?.vat_rate || 15, vat_amount: 0, total: 0
   }])
-  const [activeItemId, setActiveItemId] = useState<string | null>(null)
+
+  // Supplier autocomplete
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const [supplierOpen, setSupplierOpen]     = useState(false)
+  const supplierRef = useRef<HTMLDivElement>(null)
+
+  // Product search per line
+  const [activeItemId, setActiveItemId]   = useState<string | null>(null)
   const [productSearch, setProductSearch] = useState('')
 
-  useEffect(() => {
-    if (warehouses.length > 0 && !warehouseId) {
-      setWarehouseId(warehouses.find(w => w.is_default)?.id || warehouses[0]?.id || '')
-    }
-  }, [warehouses])
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ['suppliers-active', company?.id],
+    queryFn: async () => {
+      if (!company?.id) return []
+      const { data } = await supabase.from('suppliers')
+        .select('id, name_ar, balance, phone')
+        .eq('company_id', company.id)
+        .is('deleted_at', null)
+        .eq('is_active', true)
+        .order('name_ar')
+      return data || []
+    },
+    enabled: !!company?.id
+  })
 
-  // Populate form when editing existing purchase
-  useEffect(() => {
-    if (!existingPurchase) return
-    setSupplierId(existingPurchase.supplier_id || '')
-    setWarehouseId(existingPurchase.warehouse_id || '')
-    setPurchaseDate(existingPurchase.purchase_date || today())
-    setDueDate(existingPurchase.due_date || '')
-    setPaymentMethod(existingPurchase.payment_method || 'cash')
-    setNotes(existingPurchase.notes || '')
-    if (existingPurchase.items && existingPurchase.items.length > 0) {
-      setItems(existingPurchase.items.map((item: any, i: number) => ({
-        _id: String(i + 1),
-        product_id:      item.product_id,
-        product_name:    item.product_name,
-        quantity:        item.quantity,
-        unit_price:      item.unit_price,
-        discount_amount: item.discount_amount || 0,
-        vat_rate:        item.vat_rate || 0,
-        vat_amount:      item.vat_amount || 0,
-        total:           item.total,
-      })))
-    }
-  }, [existingPurchase])
+  const { data: products = [] } = useQuery({
+    queryKey: ['products-for-purchase', company?.id],
+    queryFn: async () => {
+      if (!company?.id) return []
+      const { data } = await supabase.from('products')
+        .select('id, name_ar, code, barcode, cost_price, vat_rate, unit:units(name_ar)')
+        .eq('company_id', company.id)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .order('name_ar')
+      return data || []
+    },
+    enabled: !!company?.id
+  })
 
-  const updateItem = (itemId: string, field: string, value: unknown) => {
-    setItems(prev => prev.map(item => {
-      if (item._id !== itemId) return item
-      const updated = { ...item, [field]: value }
-      if (['quantity', 'unit_price', 'discount_amount', 'vat_rate'].includes(field)) {
-        const qty = Number(field === 'quantity' ? value : updated.quantity) || 0
-        const price = Number(field === 'unit_price' ? value : updated.unit_price) || 0
-        const disc = Number(field === 'discount_amount' ? value : updated.discount_amount) || 0
-        const vatRate = Number(field === 'vat_rate' ? value : updated.vat_rate) || 0
-        const afterDiscount = qty * price - disc
-        const { vatAmount } = calculateVat(afterDiscount, vatRate)
-        return { ...updated, vat_amount: vatAmount, total: afterDiscount + vatAmount }
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bank-accounts', company?.id],
+    queryFn: async () => {
+      if (!company?.id) return []
+      const { data } = await supabase.from('bank_accounts')
+        .select('id, bank_name, account_number')
+        .eq('company_id', company.id)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+      return data || []
+    },
+    enabled: !!company?.id
+  })
+
+  // Generate auto invoice number
+  useEffect(() => {
+    if (!company?.id || isEdit) return
+    supabase.rpc('get_next_document_number', {
+      p_company_id: company.id,
+      p_type: 'purchase',
+      p_prefix: 'PUR'
+    }).then(({ data }) => {
+      if (data) setPurchaseNumber(data)
+    })
+  }, [company?.id, isEdit])
+
+  // Load existing purchase for edit
+  useEffect(() => {
+    if (!id || !company?.id) return
+    ;(async () => {
+      const { data: p } = await supabase
+        .from('purchases')
+        .select('*, items:purchase_items(*), supplier:suppliers(name_ar)')
+        .eq('id', id)
+        .single()
+      if (!p) return
+
+      if (p.is_locked) {
+        toast.error('هذه الفاتورة مقفلة ولا يمكن تعديلها')
+        navigate(`/purchases/${id}`)
+        return
       }
-      return updated
-    }))
+
+      setSupplierId(p.supplier_id || '')
+      setSupplierName(p.supplier?.name_ar || '')
+      setSupplierSearch(p.supplier?.name_ar || '')
+      setPurchaseDate(p.purchase_date)
+      setDueDate(p.due_date || '')
+      setPaymentMethod(p.payment_method || 'cash')
+      setBankAccountId(p.bank_account_id || '')
+      setNotes(p.notes || '')
+      setPurchaseNumber(p.purchase_number)
+      setIsLocked(p.is_locked || false)
+
+      if (p.items?.length > 0) {
+        setItems(p.items.map((it: any) => calcLine({
+          _id: it.id, product_id: it.product_id, product_name: it.product_name,
+          quantity: it.quantity, unit_price: it.unit_price,
+          discount_amount: it.discount_amount || 0, vat_rate: it.vat_rate || 0,
+          vat_amount: it.vat_amount || 0, total: it.total || 0,
+          expiry_date: it.expiry_date || '', batch_number: it.batch_number || '',
+          unit_name: it.unit_name || ''
+        })))
+      }
+    })()
+  }, [id, company?.id])
+
+  // Close supplier dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (supplierRef.current && !supplierRef.current.contains(e.target as Node)) {
+        setSupplierOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const filteredSuppliers = suppliers.filter((s: any) =>
+    s.name_ar.includes(supplierSearch) || supplierSearch === ''
+  )
+
+  const selectSupplier = (s: any) => {
+    setSupplierId(s.id)
+    setSupplierName(s.name_ar)
+    setSupplierSearch(s.name_ar)
+    setSupplierOpen(false)
   }
 
-  const selectProduct = (itemId: string, product: (typeof products)[0]) => {
-    const item = items.find(i => i._id === itemId)
-    if (!item) return
-    updateItem(itemId, 'product_id', product.id)
-    updateItem(itemId, 'product_name', product.name_ar)
-    updateItem(itemId, 'unit_price', product.cost_price || 0)
-    updateItem(itemId, 'vat_rate', product.vat_rate || 0)
+  const filteredProducts = (products as any[]).filter((p: any) =>
+    p.name_ar.includes(productSearch) || p.code?.includes(productSearch) ||
+    p.barcode?.includes(productSearch) || productSearch === ''
+  )
+
+  const selectProduct = (itemId: string, product: any) => {
+    setItems(prev => prev.map(it => {
+      if (it._id !== itemId) return it
+      return calcLine({
+        ...it,
+        product_id: product.id,
+        product_name: product.name_ar,
+        unit_price: product.cost_price || 0,
+        vat_rate: product.vat_rate || 15,
+        unit_name: product.unit?.name_ar || ''
+      })
+    }))
     setActiveItemId(null)
     setProductSearch('')
   }
 
-  const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
-  const totalDiscount = items.reduce((s, i) => s + i.discount_amount, 0)
-  const taxAmount = items.reduce((s, i) => s + i.vat_amount, 0)
-  const total = subtotal - totalDiscount + taxAmount
+  const updateItem = (id: string, field: keyof LineItem, value: any) => {
+    setItems(prev => prev.map(it => {
+      if (it._id !== id) return it
+      return calcLine({ ...it, [field]: value })
+    }))
+  }
 
-  const handleSave = async () => {
-    if (!items.some(i => i.product_name)) { toast.error('أضف منتجاً واحداً على الأقل'); return }
-    const purchaseData = {
-      supplier_id: supplierId || undefined,
-      warehouse_id: warehouseId || undefined,
-      purchase_date: purchaseDate,
-      due_date: dueDate || undefined,
-      payment_method: paymentMethod as 'cash' | 'mada' | 'transfer' | 'deferred',
-      subtotal, discount_amount: totalDiscount, tax_amount: taxAmount, total,
-      paid_amount: paymentMethod === 'deferred' ? 0 : total,
-      notes
-    }
-    const lineItems = items.filter(i => i.product_name).map(({ _id, ...item }) => item)
+  const addItem = () => {
+    setItems(prev => [...prev, {
+      _id: Date.now().toString(), product_name: '', quantity: 1, unit_price: 0,
+      discount_amount: 0, vat_rate: company?.vat_rate || 15, vat_amount: 0, total: 0
+    }])
+  }
+
+  const addSameProduct = (item: LineItem) => {
+    setItems(prev => [...prev, {
+      _id: Date.now().toString(),
+      product_id: item.product_id,
+      product_name: item.product_name,
+      unit_name: item.unit_name,
+      quantity: 1, unit_price: item.unit_price,
+      discount_amount: 0, vat_rate: item.vat_rate,
+      vat_amount: 0, total: 0, expiry_date: '', batch_number: ''
+    }])
+  }
+
+  const removeItem = (id: string) => {
+    if (items.length <= 1) return toast.error('يجب أن يكون هناك سطر واحد على الأقل')
+    setItems(prev => prev.filter(it => it._id !== id))
+  }
+
+  const subtotal   = items.reduce((s, it) => s + (it.quantity * it.unit_price - it.discount_amount), 0)
+  const totalVat   = items.reduce((s, it) => s + it.vat_amount, 0)
+  const grandTotal = subtotal + totalVat
+
+  const handleSave = async (draft = true) => {
+    // Validation
+    if (!supplierId) return toast.error('يجب اختيار مورد')
+    if (items.some(it => !it.product_name)) return toast.error('يجب إدخال اسم المنتج في جميع الأسطر')
+    if (items.some(it => it.quantity <= 0)) return toast.error('الكمية يجب أن تكون أكبر من صفر')
+
+    setSaving(true)
     try {
-      if (isEdit && id) {
-        await updatePurchase.mutateAsync({ id, purchase: purchaseData, items: lineItems })
-      } else {
-        await createPurchase.mutateAsync({ purchase: purchaseData, items: lineItems })
+      const purchaseData = {
+        company_id:     company!.id,
+        supplier_id:    supplierId,
+        purchase_date:  purchaseDate,
+        due_date:       dueDate || null,
+        payment_method: paymentMethod,
+        bank_account_id: paymentMethod === 'transfer' || paymentMethod === 'mada' ? bankAccountId || null : null,
+        notes,
+        subtotal,
+        discount_amount: 0,
+        tax_amount: totalVat,
+        total: grandTotal,
+        paid_amount:     draft ? 0 : grandTotal,
+        remaining_amount: draft ? grandTotal : 0,
+        status: draft ? 'draft' : 'confirmed',
+        user_id: user?.id,
+        updated_at: new Date().toISOString()
       }
-      navigate('/purchases')
-    } catch { /* error toast shown by hook */ }
+
+      const itemsData = items.map(it => ({
+        product_id: it.product_id || null,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        discount_amount: it.discount_amount,
+        vat_rate: it.vat_rate,
+        vat_amount: it.vat_amount,
+        total: it.total,
+        expiry_date: it.expiry_date || null,
+        batch_number: it.batch_number || null,
+        unit_name: it.unit_name || null
+      }))
+
+      let purchaseId = id
+
+      if (isEdit) {
+        await supabase.from('purchases').update(purchaseData).eq('id', id!)
+        await supabase.from('purchase_items').delete().eq('purchase_id', id!)
+        await supabase.from('purchase_items').insert(itemsData.map(it => ({ ...it, purchase_id: id! })))
+      } else {
+        const { data: newP, error } = await supabase.from('purchases').insert({
+          ...purchaseData,
+          purchase_number: purchaseNumber
+        }).select('id').single()
+
+        if (error) throw error
+        purchaseId = newP.id
+        await supabase.from('purchase_items').insert(itemsData.map(it => ({ ...it, purchase_id: newP.id })))
+      }
+
+      toast.success(draft ? 'تم الحفظ كمسودة' : 'تم الحفظ')
+      navigate(`/purchases/${purchaseId}`)
+    } catch (err: any) {
+      toast.error(err.message || 'حدث خطأ أثناء الحفظ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (isLocked) {
+    return (
+      <div className="flex items-center justify-center h-64" dir="rtl">
+        <div className="text-center">
+          <Lock size={48} className="mx-auto text-amber-400 mb-3" />
+          <p className="text-gray-600">هذه الفاتورة مقفلة ولا يمكن تعديلها</p>
+          <button onClick={() => navigate(`/purchases/${id}`)}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg">
+            عرض الفاتورة
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6 pb-20" dir="rtl">
       <PageHeader
-        title={isEdit ? 'تعديل فاتورة الشراء' : 'فاتورة شراء جديدة'}
+        title={isEdit ? `تعديل فاتورة ${purchaseNumber}` : 'فاتورة مشتريات جديدة'}
+        subtitle="إدخال بيانات الفاتورة والأصناف"
         actions={
-          <>
-            <button onClick={() => navigate('/purchases')} className="btn-outline gap-1.5">
-              <ArrowRight className="w-4 h-4" />رجوع
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/purchases')}
+              className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+              <ArrowRight size={15} /> رجوع
             </button>
-            <button onClick={handleSave} disabled={createPurchase.isPending} className="btn-primary gap-1.5">
-              {createPurchase.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              حفظ الفاتورة
+            <button onClick={() => handleSave(true)} disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">
+              {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+              حفظ كمسودة
             </button>
-          </>
+            <button onClick={() => handleSave(false)} disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+              حفظ
+            </button>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          <div className="bg-card border border-border/60 rounded-xl p-5">
-            <h3 className="font-semibold text-sm text-muted-foreground mb-4">معلومات الفاتورة</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="form-label">المورد</label>
-                <select value={supplierId} onChange={e => setSupplierId(e.target.value)} className="form-select">
-                  <option value="">اختر المورد</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name_ar}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="form-label">المستودع</label>
-                <select value={warehouseId} onChange={e => setWarehouseId(e.target.value)} className="form-select">
-                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name_ar}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="form-label">تاريخ الفاتورة</label>
-                <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} className="form-input" />
-              </div>
-              <div>
-                <label className="form-label">تاريخ الاستحقاق</label>
-                <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="form-input" />
-              </div>
-              <div>
-                <label className="form-label">طريقة الدفع</label>
-                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="form-select">
-                  <option value="cash">نقدي</option>
-                  <option value="transfer">تحويل بنكي</option>
-                  <option value="deferred">آجل</option>
-                </select>
-              </div>
-              <div>
-                <label className="form-label">ملاحظات</label>
-                <input value={notes} onChange={e => setNotes(e.target.value)} className="form-input" placeholder="ملاحظات اختيارية" />
-              </div>
+      {/* بيانات الفاتورة الرئيسية */}
+      <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+          {/* رقم الفاتورة (للقراءة فقط) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              رقم الفاتورة
+              <span className="mr-1 text-xs text-gray-400">(تلقائي - لا يمكن تعديله)</span>
+            </label>
+            <div className="flex items-center gap-2 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2">
+              <Lock size={14} className="text-gray-400" />
+              <span className="font-mono font-bold text-blue-700">{purchaseNumber || '...'}</span>
             </div>
           </div>
 
-          <div className="bg-card border border-border/60 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-border/50 flex items-center justify-between">
-              <h3 className="font-semibold text-sm text-muted-foreground">بنود الفاتورة</h3>
-              <button onClick={() => setItems(p => [...p, { _id: crypto.randomUUID(), product_name: '', quantity: 1, unit_price: 0, discount_amount: 0, vat_rate: company?.vat_rate || 15, vat_amount: 0, total: 0 }])}
-                className="btn-primary text-xs py-1.5 px-3 gap-1">
-                <Plus className="w-3.5 h-3.5" />إضافة بند
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-48">المنتج</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-20">الكمية</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-28">سعر الشراء</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-24">خصم</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-20">ض.ق.م %</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-28">الإجمالي</th>
-                    <th className="w-10" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map(item => (
-                    <tr key={item._id} className="border-b border-border/50 hover:bg-muted/20">
-                      <td className="px-3 py-2">
-                        <div className="relative">
-                          <input value={item.product_name} onChange={e => { updateItem(item._id, 'product_name', e.target.value); setActiveItemId(item._id); setProductSearch(e.target.value) }}
-                            onFocus={() => setActiveItemId(item._id)} className="form-input text-xs h-8" placeholder="اسم المنتج..." />
-                          {activeItemId === item._id && productSearch && (
-                            <div className="absolute top-full right-0 z-30 w-64 bg-popover border border-border rounded-xl shadow-xl overflow-hidden mt-1">
-                              {products.filter(p => p.name_ar.includes(productSearch)).slice(0, 8).map(p => (
-                                <button key={p.id} onMouseDown={() => selectProduct(item._id, p)}
-                                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted text-right text-xs">
-                                  <div><p className="font-medium text-foreground">{p.name_ar}</p><p className="text-muted-foreground">{formatCurrency(p.cost_price || 0)}</p></div>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2"><input type="number" value={item.quantity || ''} onChange={e => updateItem(item._id, 'quantity', parseFloat(e.target.value) || 0)} className="form-input text-xs h-8 w-20" dir="ltr" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.unit_price || ''} onChange={e => updateItem(item._id, 'unit_price', parseFloat(e.target.value) || 0)} className="form-input text-xs h-8 w-28" dir="ltr" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.discount_amount || ''} onChange={e => updateItem(item._id, 'discount_amount', parseFloat(e.target.value) || 0)} className="form-input text-xs h-8 w-20" dir="ltr" /></td>
-                      <td className="px-3 py-2"><input type="number" value={item.vat_rate ?? ''} onChange={e => updateItem(item._id, 'vat_rate', parseFloat(e.target.value) || 0)} className="form-input text-xs h-8 w-20" dir="ltr" /></td>
-                      <td className="px-3 py-2"><span className="font-bold text-sm">{formatCurrency(item.total)}</span></td>
-                      <td className="px-3 py-2"><button onClick={() => setItems(p => p.filter(i => i._id !== item._id))} className="text-destructive p-1 rounded-lg hover:bg-destructive/10"><Trash2 className="w-3.5 h-3.5" /></button></td>
-                    </tr>
+          {/* المورد */}
+          <div className="lg:col-span-2" ref={supplierRef}>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              المورد <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <div className={`flex items-center border rounded-lg px-3 py-2 gap-2 cursor-pointer ${
+                !supplierId ? 'border-red-300 bg-red-50' : 'border-gray-300'
+              }`} onClick={() => setSupplierOpen(true)}>
+                <Search size={14} className="text-gray-400 flex-shrink-0" />
+                <input
+                  value={supplierSearch}
+                  onChange={e => { setSupplierSearch(e.target.value); setSupplierOpen(true); if (!e.target.value) { setSupplierId(''); setSupplierName('') } }}
+                  className="flex-1 outline-none bg-transparent text-sm"
+                  placeholder="ابحث باسم المورد..."
+                />
+                <ChevronDown size={14} className="text-gray-400" />
+              </div>
+
+              {supplierOpen && filteredSuppliers.length > 0 && (
+                <div className="absolute top-full right-0 left-0 mt-1 bg-white border rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto">
+                  {filteredSuppliers.map((s: any) => (
+                    <button key={s.id} onClick={() => selectSupplier(s)}
+                      className="w-full text-right px-4 py-2.5 hover:bg-blue-50 border-b last:border-0 flex items-center justify-between">
+                      <span className="font-medium text-sm">{s.name_ar}</span>
+                      {s.balance > 0 && (
+                        <span className="text-xs text-red-500">مديونية: {formatCurrency(s.balance)}</span>
+                      )}
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
+            {!supplierId && (
+              <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                <AlertCircle size={11} /> اختيار المورد إلزامي
+              </p>
+            )}
+          </div>
+
+          {/* التاريخ */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              تاريخ الفاتورة <span className="text-red-500">*</span>
+            </label>
+            <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          {/* تاريخ الاستحقاق */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">تاريخ الاستحقاق</label>
+            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          {/* طريقة الدفع */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              طريقة الدفع <span className="text-red-500">*</span>
+            </label>
+            <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm">
+              {PAYMENT_METHODS.map(m => (
+                <option key={m.value} value={m.value}>{m.icon} {m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* الحساب البنكي */}
+          {(paymentMethod === 'transfer' || paymentMethod === 'mada') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                الحساب البنكي <span className="text-red-500">*</span>
+              </label>
+              <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm">
+                <option value="">-- اختر الحساب البنكي --</option>
+                {(bankAccounts as any[]).map((b: any) => (
+                  <option key={b.id} value={b.id}>
+                    {b.bank_name} {b.account_number ? `(${b.account_number})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* ملاحظات */}
+          <div className="lg:col-span-3">
+            <label className="block text-sm font-medium text-gray-700 mb-1">ملاحظات</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              rows={2} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
           </div>
         </div>
 
-        <div>
-          <div className="bg-card border border-border/60 rounded-xl p-5 space-y-3 sticky top-20">
-            <h3 className="font-semibold">ملخص الفاتورة</h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between text-muted-foreground"><span>{formatCurrency(subtotal)}</span><span>المجموع الفرعي</span></div>
-              {totalDiscount > 0 && <div className="flex justify-between text-emerald-600"><span>-{formatCurrency(totalDiscount)}</span><span>الخصم</span></div>}
-              {taxAmount > 0 && <div className="flex justify-between text-muted-foreground"><span>{formatCurrency(taxAmount)}</span><span>ض.ق.م</span></div>}
-              <div className="flex justify-between font-bold text-lg text-foreground pt-2 border-t border-border"><span>{formatCurrency(total)}</span><span>الإجمالي</span></div>
-            </div>
-            <button onClick={handleSave} disabled={createPurchase.isPending} className="btn-primary w-full justify-center py-2.5 gap-1.5">
-              {createPurchase.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              حفظ الفاتورة
-            </button>
+        {/* معلومة طريقة الدفع */}
+        {paymentMethod === 'cash' && (
+          <div className="mt-3 p-3 bg-blue-50 rounded-lg text-sm text-blue-700 flex items-center gap-2">
+            <Lock size={14} />
+            السداد النقدي يخصم من الخزينة الرئيسية فقط عند الاعتماد
           </div>
+        )}
+        {paymentMethod === 'deferred' && (
+          <div className="mt-3 p-3 bg-amber-50 rounded-lg text-sm text-amber-700 flex items-center gap-2">
+            <AlertCircle size={14} />
+            الدفع الآجل يُضاف لذمة المورد ويتطلب إيصال سداد لاحقاً
+          </div>
+        )}
+      </div>
+
+      {/* جدول الأصناف */}
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            <Package size={18} className="text-blue-600" />
+            الأصناف ({items.length})
+          </h3>
+          <button onClick={addItem}
+            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+            <Plus size={14} /> إضافة صنف
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-8">#</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 min-w-[200px]">الصنف</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-24">تاريخ الصلاحية</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-24">رقم الدفعة</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-20">الكمية</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-24">سعر الوحدة</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-20">الخصم</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-20">%ض.ق.م</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-24">الإجمالي</th>
+                <th className="text-center px-3 py-3 font-medium text-gray-600 w-20">إجراء</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {items.map((item, idx) => (
+                <tr key={item._id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 text-gray-400 text-center">{idx + 1}</td>
+
+                  {/* الصنف مع بحث */}
+                  <td className="px-3 py-2 relative">
+                    <div className="relative">
+                      <input
+                        value={activeItemId === item._id ? productSearch : item.product_name}
+                        onChange={e => {
+                          if (activeItemId !== item._id) setActiveItemId(item._id)
+                          setProductSearch(e.target.value)
+                          updateItem(item._id, 'product_name', e.target.value)
+                        }}
+                        onFocus={() => { setActiveItemId(item._id); setProductSearch('') }}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm"
+                        placeholder="اسم الصنف أو الباركود..."
+                      />
+                      {activeItemId === item._id && filteredProducts.length > 0 && (
+                        <div className="absolute top-full right-0 mt-1 bg-white border rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto min-w-[280px]">
+                          {filteredProducts.slice(0, 20).map((p: any) => (
+                            <button key={p.id} onMouseDown={() => selectProduct(item._id, p)}
+                              className="w-full text-right px-3 py-2 hover:bg-blue-50 border-b last:border-0 flex items-center justify-between">
+                              <div>
+                                <div className="font-medium text-sm">{p.name_ar}</div>
+                                <div className="text-xs text-gray-400">{p.code}</div>
+                              </div>
+                              <div className="text-xs text-blue-600">{formatCurrency(p.cost_price)}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {item.unit_name && (
+                      <span className="text-xs text-gray-400 mt-0.5 block">{item.unit_name}</span>
+                    )}
+                  </td>
+
+                  {/* تاريخ الصلاحية */}
+                  <td className="px-3 py-2">
+                    <input type="date" value={item.expiry_date || ''}
+                      onChange={e => updateItem(item._id, 'expiry_date', e.target.value)}
+                      className="w-full border rounded px-2 py-1.5 text-sm" />
+                  </td>
+
+                  {/* رقم الدفعة */}
+                  <td className="px-3 py-2">
+                    <input value={item.batch_number || ''}
+                      onChange={e => updateItem(item._id, 'batch_number', e.target.value)}
+                      className="w-full border rounded px-2 py-1.5 text-sm"
+                      placeholder="اختياري" />
+                  </td>
+
+                  {/* الكمية */}
+                  <td className="px-3 py-2">
+                    <input type="number" value={item.quantity} min="0.001" step="0.001"
+                      onChange={e => updateItem(item._id, 'quantity', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+
+                  {/* السعر */}
+                  <td className="px-3 py-2">
+                    <input type="number" value={item.unit_price} min="0" step="0.01"
+                      onChange={e => updateItem(item._id, 'unit_price', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+
+                  {/* الخصم */}
+                  <td className="px-3 py-2">
+                    <input type="number" value={item.discount_amount} min="0" step="0.01"
+                      onChange={e => updateItem(item._id, 'discount_amount', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+
+                  {/* ض.ق.م */}
+                  <td className="px-3 py-2">
+                    <input type="number" value={item.vat_rate} min="0" max="100" step="0.5"
+                      onChange={e => updateItem(item._id, 'vat_rate', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+
+                  {/* الإجمالي */}
+                  <td className="px-3 py-2 text-right font-medium text-blue-700">
+                    {formatCurrency(item.total)}
+                  </td>
+
+                  {/* إجراءات */}
+                  <td className="px-3 py-2">
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => addSameProduct(item)} title="إضافة نفس الصنف بدفعة مختلفة"
+                        className="p-1 hover:bg-green-50 rounded text-green-600 text-xs">
+                        <Plus size={13} />
+                      </button>
+                      <button onClick={() => removeItem(item._id)} title="حذف السطر"
+                        className="p-1 hover:bg-red-50 rounded text-red-500">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ملخص الإجماليات */}
+      <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="max-w-sm mr-auto space-y-3">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">الإجمالي قبل الضريبة:</span>
+            <span className="font-medium">{formatCurrency(subtotal)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">ضريبة القيمة المضافة:</span>
+            <span className="font-medium text-orange-600">{formatCurrency(totalVat)}</span>
+          </div>
+          <div className="flex justify-between font-bold text-lg border-t pt-3">
+            <span>الإجمالي الكلي:</span>
+            <span className="text-blue-700">{formatCurrency(grandTotal)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* أزرار الحفظ */}
+      <div className="fixed bottom-0 right-0 left-0 bg-white border-t px-6 py-4 flex items-center justify-between z-40">
+        <div className="text-sm text-gray-500">
+          {items.length} صنف | إجمالي: <span className="font-bold text-blue-700">{formatCurrency(grandTotal)}</span>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={() => navigate('/purchases')}
+            className="px-5 py-2.5 border rounded-lg text-sm hover:bg-gray-50">
+            إلغاء
+          </button>
+          <button onClick={() => handleSave(true)} disabled={saving}
+            className="px-5 py-2.5 border border-gray-400 rounded-lg text-sm hover:bg-gray-50 flex items-center gap-2">
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            حفظ كمسودة
+          </button>
+          <button onClick={() => handleSave(false)} disabled={saving}
+            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-2">
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            <Save size={14} />
+            حفظ الفاتورة
+          </button>
         </div>
       </div>
     </div>

@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Tags, Plus, Edit2, Trash2, Search, DollarSign } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/authStore'
 import PageHeader from '@/components/shared/PageHeader'
 import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -20,17 +23,6 @@ const COLORS = [
   '#EC4899', '#06B6D4', '#F97316', '#6366F1', '#14B8A6'
 ]
 
-const MOCK_CATEGORIES: ExpenseCategory[] = [
-  { id: '1', name: 'إيجارات',          name_en: 'Rent',           color: '#3B82F6', budget_monthly: 15000, spent_monthly: 15000, count: 3,  is_active: true },
-  { id: '2', name: 'رواتب',            name_en: 'Salaries',       color: '#10B981', budget_monthly: 80000, spent_monthly: 75000, count: 12, is_active: true },
-  { id: '3', name: 'مرافق',            name_en: 'Utilities',      color: '#F59E0B', budget_monthly: 5000,  spent_monthly: 3200,  count: 6,  is_active: true },
-  { id: '4', name: 'تسويق وإعلان',     name_en: 'Marketing',      color: '#EF4444', budget_monthly: 10000, spent_monthly: 8500,  count: 8,  is_active: true },
-  { id: '5', name: 'صيانة وإصلاح',     name_en: 'Maintenance',    color: '#8B5CF6', budget_monthly: 3000,  spent_monthly: 1200,  count: 4,  is_active: true },
-  { id: '6', name: 'سفر وانتقالات',    name_en: 'Travel',         color: '#EC4899', budget_monthly: 2000,  spent_monthly: 950,   count: 5,  is_active: true },
-  { id: '7', name: 'قرطاسية ومستلزمات',name_en: 'Stationery',     color: '#06B6D4', budget_monthly: 500,   spent_monthly: 320,   count: 7,  is_active: true },
-  { id: '8', name: 'خدمات مهنية',      name_en: 'Professional',   color: '#F97316', budget_monthly: 5000,  spent_monthly: 4500,  count: 2,  is_active: true },
-  { id: '9', name: 'بنك ورسوم',        name_en: 'Bank Fees',      color: '#6366F1', budget_monthly: 800,   spent_monthly: 640,   count: 9,  is_active: false },
-]
 
 function CategoryModal({ category, onSave, onClose }: {
   category: Partial<ExpenseCategory> | null
@@ -88,33 +80,64 @@ function CategoryModal({ category, onSave, onClose }: {
 }
 
 export default function ExpenseCategoriesPage() {
-  const [categories, setCategories] = useState(MOCK_CATEGORIES)
+  const { user } = useAuthStore()
+  const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState<Partial<ExpenseCategory> | null | false>(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
+  // ── Fetch categories from Supabase ────────────────────────────────────────
+  const { data: categories = [] } = useQuery<ExpenseCategory[]>({
+    queryKey: ['expense_categories', user?.company_id],
+    queryFn: async () => {
+      if (!user) return []
+      // Get categories with expense count this month
+      const { data, error } = await supabase
+        .from('expense_categories')
+        .select('*')
+        .eq('company_id', user.company_id)
+        .order('name')
+      if (error) throw error
+      return (data as ExpenseCategory[]) || []
+    },
+    enabled: !!user,
+  })
+
   const filtered = categories.filter(c =>
-    c.name.includes(search) || c.name_en.toLowerCase().includes(search.toLowerCase())
+    c.name?.includes(search) || (c.name_en || '').toLowerCase().includes(search.toLowerCase())
   )
 
-  const handleSave = (form: Partial<ExpenseCategory>) => {
+  const handleSave = async (form: Partial<ExpenseCategory>) => {
+    if (!form.name) { toast.error('اسم التصنيف مطلوب'); return }
     if (form.id) {
-      setCategories(prev => prev.map(c => c.id === form.id ? { ...c, ...form } : c))
+      const { error } = await supabase.from('expense_categories').update({
+        name: form.name, name_en: form.name_en, color: form.color,
+        budget_monthly: form.budget_monthly || 0, is_active: form.is_active,
+      }).eq('id', form.id)
+      if (error) { toast.error(error.message); return }
       toast.success('تم تعديل التصنيف')
     } else {
-      setCategories(prev => [...prev, { ...form, id: String(Date.now()), count: 0, spent_monthly: 0 } as ExpenseCategory])
+      const { error } = await supabase.from('expense_categories').insert({
+        company_id: user!.company_id, name: form.name, name_en: form.name_en || '',
+        color: form.color || COLORS[0], budget_monthly: form.budget_monthly || 0,
+        spent_monthly: 0, count: 0, is_active: form.is_active ?? true,
+      })
+      if (error) { toast.error(error.message); return }
       toast.success('تم إضافة التصنيف')
     }
+    qc.invalidateQueries({ queryKey: ['expense_categories'] })
   }
 
-  const handleDelete = (id: string) => {
-    setCategories(prev => prev.filter(c => c.id !== id))
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from('expense_categories').delete().eq('id', id)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['expense_categories'] })
     toast.success('تم حذف التصنيف')
     setDeleteId(null)
   }
 
-  const totalBudget = categories.reduce((s, c) => s + c.budget_monthly, 0)
-  const totalSpent  = categories.reduce((s, c) => s + c.spent_monthly, 0)
+  const totalBudget = categories.reduce((s, c) => s + (c.budget_monthly || 0), 0)
+  const totalSpent  = categories.reduce((s, c) => s + (c.spent_monthly  || 0), 0)
 
   return (
     <div className="space-y-5">

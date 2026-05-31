@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Plus, Calendar, CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react'
+import { Plus, Calendar, CheckCircle2, XCircle, Clock, Loader2, Save } from 'lucide-react'
+import { useLeaves, useCreateLeave, useUpdateLeaveStatus, useEmployees } from '@/hooks/useHR'
 import { formatDate } from '@/lib/utils'
 import PageHeader from '@/components/shared/PageHeader'
 import DataTable, { Column } from '@/components/shared/DataTable'
@@ -21,13 +22,6 @@ type LeaveRequest = {
 
 const LEAVE_TYPES = ['إجازة سنوية','إجازة مرضية','إجازة أمومة','إجازة أبوة','إجازة بدون راتب','إجازة طارئة','إجازة زواج']
 
-const MOCK: LeaveRequest[] = [
-  { id:'1', employee_name:'محمد خالد الغامدي', department:'المبيعات', leave_type:'إجازة سنوية', start_date:'2026-06-01', end_date:'2026-06-14', days:14, reason:'إجازة سنوية مستحقة', status:'pending', applied_on:'2026-05-20' },
-  { id:'2', employee_name:'سارة عبدالله الأحمدي', department:'المحاسبة', leave_type:'إجازة مرضية', start_date:'2026-05-26', end_date:'2026-05-28', days:3, reason:'مراجعة طبية', status:'approved', applied_on:'2026-05-25' },
-  { id:'3', employee_name:'فاطمة علي الزهراني', department:'الموارد البشرية', leave_type:'إجازة أمومة', start_date:'2026-05-15', end_date:'2026-07-24', days:70, reason:'إجازة أمومة', status:'approved', applied_on:'2026-05-10' },
-  { id:'4', employee_name:'نورة سالم الشمري', department:'التسويق', leave_type:'إجازة طارئة', start_date:'2026-05-27', end_date:'2026-05-27', days:1, reason:'ظرف طارئ', status:'rejected', applied_on:'2026-05-27' },
-  { id:'5', employee_name:'عمر عبدالرحمن القحطاني', department:'تقنية المعلومات', leave_type:'إجازة سنوية', start_date:'2026-07-01', end_date:'2026-07-10', days:10, reason:'رحلة عائلية', status:'pending', applied_on:'2026-05-28' },
-]
 
 const STATUS_CFG = {
   pending:  { label:'قيد المراجعة', color:'bg-amber-100 text-amber-700 dark:bg-amber-900/30' },
@@ -48,24 +42,46 @@ const LEAVE_TYPE_COLORS: Record<string, string> = {
 export default function LeavesPage() {
   const [showForm, setShowForm] = useState(false)
   const [statusFilter, setStatusFilter] = useState('')
-  const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ employee_id:'', leave_type:'', start_date:'', end_date:'', reason:'' })
 
-  const filtered = MOCK.filter(l => !statusFilter || l.status === statusFilter)
-  const pending = MOCK.filter(l => l.status === 'pending').length
-  const approved = MOCK.filter(l => l.status === 'approved').length
-  const totalDays = MOCK.filter(l => l.status === 'approved').reduce((s,l) => s + l.days, 0)
+  const { data: rawLeaves = [], isLoading } = useLeaves({ status: statusFilter || undefined })
+  const createLeave  = useCreateLeave()
+  const updateStatus = useUpdateLeaveStatus()
+  const { data: empResult } = useEmployees()
+  const employees = empResult?.data ?? []
 
-  const handleApprove = (id: string, action: 'approve' | 'reject') => {
-    toast.success(action === 'approve' ? 'تمت الموافقة على الطلب' : 'تم رفض الطلب')
+  const leaves: LeaveRequest[] = rawLeaves.map((l: any) => ({
+    id:            l.id,
+    employee_name: l.employee?.full_name || '',
+    department:    l.employee?.department || '',
+    leave_type:    l.leave_type || l.type || '',
+    start_date:    l.start_date,
+    end_date:      l.end_date,
+    days:          l.days || Math.ceil((new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000) + 1,
+    reason:        l.reason || '',
+    status:        l.status as 'pending' | 'approved' | 'rejected',
+    applied_on:    l.created_at?.slice(0,10) || '',
+  }))
+
+  const filtered  = leaves.filter(l => !statusFilter || l.status === statusFilter)
+  const pending   = leaves.filter(l => l.status === 'pending').length
+  const approved  = leaves.filter(l => l.status === 'approved').length
+  const totalDays = leaves.filter(l => l.status === 'approved').reduce((s,l) => s + l.days, 0)
+
+  const handleApprove = async (id: string, action: 'approve' | 'reject') => {
+    await updateStatus.mutateAsync({ id, status: action === 'approve' ? 'approved' : 'rejected' })
   }
 
   const handleSubmit = async () => {
-    if (!form.leave_type || !form.start_date || !form.end_date) { toast.error('أدخل جميع البيانات المطلوبة'); return }
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 700))
-    setSaving(false)
-    toast.success('تم تقديم طلب الإجازة')
+    if (!form.employee_id || !form.leave_type || !form.start_date || !form.end_date) {
+      toast.error('أدخل جميع البيانات المطلوبة'); return
+    }
+    const days = Math.ceil((new Date(form.end_date).getTime() - new Date(form.start_date).getTime()) / 86400000) + 1
+    await createLeave.mutateAsync({
+      employee_id: form.employee_id, type: form.leave_type,
+      start_date: form.start_date, end_date: form.end_date,
+      days, reason: form.reason,
+    })
     setShowForm(false)
     setForm({ employee_id:'', leave_type:'', start_date:'', end_date:'', reason:'' })
   }
@@ -105,7 +121,7 @@ export default function LeavesPage() {
     <div className="space-y-5">
       <PageHeader
         title="الإجازات والغيابات"
-        subtitle={`${MOCK.length} طلب إجازة`}
+        subtitle={`${leaves.length} طلب إجازة`}
         actions={
           <button onClick={() => setShowForm(true)} className="btn-primary gap-1.5">
             <Plus className="w-4 h-4" />طلب إجازة
@@ -116,7 +132,7 @@ export default function LeavesPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label:'إجمالي الطلبات', value:MOCK.length, color:'text-foreground', bg:'bg-blue-500', icon:Calendar },
+          { label:'إجمالي الطلبات', value:leaves.length, color:'text-foreground', bg:'bg-blue-500', icon:Calendar },
           { label:'قيد المراجعة',   value:pending,      color:'text-amber-600',  bg:'bg-amber-500', icon:Clock },
           { label:'موافق عليها',    value:approved,     color:'text-emerald-600',bg:'bg-emerald-500', icon:CheckCircle2 },
           { label:'إجمالي أيام الإجازات المعتمدة', value:`${totalDays} يوم`, color:'text-primary', bg:'bg-primary', icon:Calendar },
@@ -143,11 +159,18 @@ export default function LeavesPage() {
         ))}
       </div>
 
-      <DataTable columns={columns} data={filtered} loading={false} emptyMessage="لا توجد طلبات إجازة" />
+      <DataTable columns={columns} data={filtered} loading={isLoading} emptyMessage="لا توجد طلبات إجازة" />
 
       {/* Submit Leave Modal */}
       <Modal open={showForm} onClose={() => setShowForm(false)} title="تقديم طلب إجازة">
         <div className="space-y-4 p-1">
+          <div>
+            <label className="form-label">الموظف *</label>
+            <select value={form.employee_id} onChange={e => setForm(p=>({...p,employee_id:e.target.value}))} className="form-select">
+              <option value="">اختر الموظف</option>
+              {employees.map((e: any) => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+            </select>
+          </div>
           <div>
             <label className="form-label">نوع الإجازة *</label>
             <select value={form.leave_type} onChange={e => setForm(p=>({...p,leave_type:e.target.value}))} className="form-select">
@@ -178,8 +201,8 @@ export default function LeavesPage() {
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <button onClick={() => setShowForm(false)} className="btn-outline">إلغاء</button>
-            <button onClick={handleSubmit} disabled={saving} className="btn-primary gap-2">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
+            <button onClick={handleSubmit} disabled={createLeave.isPending} className="btn-primary gap-2">
+              {createLeave.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               تقديم الطلب
             </button>
           </div>

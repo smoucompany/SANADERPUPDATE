@@ -51,7 +51,9 @@ export default function SalesPage() {
           <button onClick={() => navigate(`/sales/${row.id}/edit`)} className="btn-ghost p-1.5 rounded-lg">
             <Edit2 className="w-3.5 h-3.5" />
           </button>
-          <button className="btn-ghost p-1.5 rounded-lg"><Printer className="w-3.5 h-3.5" /></button>
+          <button onClick={() => navigate(`/sales/${row.id}`)} className="btn-ghost p-1.5 rounded-lg" title="طباعة">
+            <Printer className="w-3.5 h-3.5" />
+          </button>
           <button onClick={() => setDeleteId(row.id)} className="btn-ghost p-1.5 rounded-lg text-destructive hover:bg-destructive/10">
             <Trash2 className="w-3.5 h-3.5" />
           </button>

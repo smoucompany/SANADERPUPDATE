@@ -426,6 +426,282 @@ export interface Settings {
   [key: string]: string | number | boolean | Record<string, unknown>
 }
 
+// =====================================================
+// New Types - ERP Enhancement
+// =====================================================
+
+export type CashboxType = 'main' | 'sub'
+export type WarehouseRole = 'incoming' | 'operations' | 'general'
+export type BankTransactionType = 'deposit' | 'withdrawal' | 'transfer' | 'expense' | 'purchase_payment' | 'sale_receipt'
+export type AuditAction = 'create' | 'update' | 'delete' | 'approve' | 'reject' | 'lock' | 'unlock' | 'post' | 'reverse'
+
+export interface CashboxEnhanced extends Cashbox {
+  cashbox_type: CashboxType
+  is_main: boolean
+  description?: string
+  updated_at?: string
+  deleted_at?: string
+}
+
+export interface CashboxTransfer {
+  id: string
+  company_id: string
+  transfer_number: string
+  transfer_date: string
+  from_cashbox_id: string
+  to_cashbox_id: string
+  amount: number
+  notes?: string
+  user_id?: string
+  is_posted: boolean
+  deleted_at?: string
+  created_at: string
+  from_cashbox?: CashboxEnhanced
+  to_cashbox?: CashboxEnhanced
+  user?: User
+}
+
+export interface CashboxMovement {
+  id: string
+  company_id: string
+  cashbox_id: string
+  movement_date: string
+  reference_type?: string
+  reference_id?: string
+  reference_number?: string
+  description?: string
+  debit: number
+  credit: number
+  balance: number
+  user_id?: string
+  created_at: string
+  cashbox?: CashboxEnhanced
+}
+
+export interface BankAccount {
+  id: string
+  company_id: string
+  account_id?: string
+  bank_name: string
+  account_number?: string
+  iban?: string
+  branch?: string
+  swift_code?: string
+  contact_phone?: string
+  currency: string
+  balance: number
+  is_active: boolean
+  notes?: string
+  deleted_at?: string
+  created_at: string
+  updated_at?: string
+}
+
+export interface BankDeposit {
+  id: string
+  company_id: string
+  deposit_number: string
+  deposit_date: string
+  bank_account_id: string
+  depositor_name?: string
+  depositor_entity?: string
+  amount: number
+  reference?: string
+  notes?: string
+  user_id?: string
+  is_posted: boolean
+  deleted_at?: string
+  created_at: string
+  bank_account?: BankAccount
+  user?: User
+}
+
+export interface BankWithdrawal {
+  id: string
+  company_id: string
+  withdrawal_number: string
+  withdrawal_date: string
+  bank_account_id: string
+  beneficiary_name?: string
+  beneficiary_entity?: string
+  amount: number
+  reference?: string
+  notes?: string
+  user_id?: string
+  is_posted: boolean
+  deleted_at?: string
+  created_at: string
+  bank_account?: BankAccount
+  user?: User
+}
+
+export interface BankMovement {
+  id: string
+  company_id: string
+  bank_account_id: string
+  movement_date: string
+  reference_type?: string
+  reference_id?: string
+  reference_number?: string
+  description?: string
+  debit: number
+  credit: number
+  balance: number
+  user_id?: string
+  created_at: string
+}
+
+export interface ExpenseCategory {
+  id: string
+  company_id: string
+  code?: string
+  name_ar: string
+  name_en?: string
+  account_id?: string
+  description?: string
+  is_active: boolean
+  created_at?: string
+}
+
+export interface InventoryBatch {
+  id: string
+  company_id: string
+  product_id: string
+  warehouse_id: string
+  purchase_id?: string
+  batch_number?: string
+  purchase_number?: string
+  supplier_id?: string
+  quantity_in: number
+  quantity_out: number
+  quantity_remaining: number
+  cost_price: number
+  total_cost: number
+  expiry_date?: string
+  receipt_date: string
+  is_active: boolean
+  notes?: string
+  created_at: string
+  product?: Product
+  warehouse?: Warehouse
+  supplier?: Supplier
+}
+
+export interface WarehouseTransfer {
+  id: string
+  company_id: string
+  transfer_number: string
+  transfer_date: string
+  from_warehouse_id: string
+  to_warehouse_id: string
+  user_id?: string
+  status: string
+  notes?: string
+  total_cost: number
+  deleted_at?: string
+  created_at: string
+  from_warehouse?: Warehouse
+  to_warehouse?: Warehouse
+  items?: WarehouseTransferItem[]
+  user?: User
+}
+
+export interface WarehouseTransferItem {
+  id: string
+  transfer_id: string
+  product_id: string
+  product_name: string
+  batch_id?: string
+  quantity: number
+  unit_cost: number
+  total_cost: number
+  expiry_date?: string
+  notes?: string
+  sort_order: number
+  product?: Product
+  batch?: InventoryBatch
+}
+
+export interface Recipe {
+  id: string
+  company_id: string
+  product_id: string
+  name_ar: string
+  name_en?: string
+  serving_size: number
+  serving_unit?: string
+  preparation_time?: number
+  instructions?: string
+  is_active: boolean
+  is_approved: boolean
+  approved_by?: string
+  approved_at?: string
+  version: number
+  notes?: string
+  created_at: string
+  updated_at: string
+  product?: Product
+  items?: RecipeItem[]
+}
+
+export interface RecipeItem {
+  id: string
+  recipe_id: string
+  product_id: string
+  product_name: string
+  quantity: number
+  unit_id?: string
+  unit_name?: string
+  notes?: string
+  sort_order: number
+  product?: Product
+}
+
+export interface AuditLog {
+  id: string
+  company_id: string
+  user_id?: string
+  user_name?: string
+  user_role?: string
+  action: AuditAction
+  table_name: string
+  record_id?: string
+  record_number?: string
+  old_data?: Record<string, unknown>
+  new_data?: Record<string, unknown>
+  ip_address?: string
+  device_info?: string
+  notes?: string
+  created_at: string
+  user?: User
+}
+
+export interface UserPermission {
+  id: string
+  user_id: string
+  company_id: string
+  module: string
+  can_view: boolean
+  can_create: boolean
+  can_edit: boolean
+  can_delete: boolean
+  can_approve: boolean
+  can_export: boolean
+  can_lock: boolean
+  can_unlock: boolean
+  created_at: string
+}
+
+export interface SupplierStatementRow {
+  doc_date: string
+  doc_number: string
+  doc_type: string
+  description: string
+  debit: number
+  credit: number
+  balance: number
+}
+
 // POS Cart Item
 export interface CartItem {
   id: string

@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+﻿import { useState, useEffect } from 'react'
+import { useParams, Navigate } from 'react-router-dom'
 import { Percent, CreditCard, Layers, Zap, QrCode, Hash, Tag, BookOpen, Save, Loader2, RefreshCw } from 'lucide-react'
 import { SectionCard, SettingRow, Toggle } from './shared'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
+import { useModuleSettings } from '@/hooks/useModuleSettings'
 import toast from 'react-hot-toast'
 
 // ─── Default chart fallback (detail accounts only) ────────────────────────────
@@ -94,24 +95,19 @@ function saveLocalSettings(s: Record<string, string>) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
+const FIN_TOGGLE_DEFAULTS = {
+  auto_journal: true, zatca: true, round_amounts: false, price_inc_tax: false,
+  pay_cash: true, pay_mada: true, pay_transfer: true, pay_credit: true,
+  pay_deferred: true, pay_visa: true, pay_stc: false,
+  auto_post: true, require_approval: false,
+}
+
 export default function FinancialSettings() {
   const { sub } = useParams<{ sub: string }>()
   const { user } = useAuthStore()
 
-  // ── General toggles ──
-  const [autoJournal, setAutoJournal] = useState(true)
-  const [zatca, setZatca]             = useState(true)
-  const [roundAmounts, setRoundAmounts] = useState(false)
-  const [priceIncTax, setPriceIncTax] = useState(false)
-  const [cash, setCash]               = useState(true)
-  const [mada, setMada]               = useState(true)
-  const [transfer, setTransfer]       = useState(true)
-  const [credit, setCredit]           = useState(true)
-  const [deferred, setDeferred]       = useState(true)
-  const [visa, setVisa]               = useState(true)
-  const [stc, setStc]                 = useState(false)
-  const [autoPost, setAutoPost]       = useState(true)
-  const [requireApproval, setRequireApproval] = useState(false)
+  const { settings: tog, save: saveToggles, isSaving: savingToggles } =
+    useModuleSettings('financial_toggles', FIN_TOGGLE_DEFAULTS)
 
   // ── Default accounts ──
   const DEFAULT_KEYS = [
@@ -181,10 +177,11 @@ export default function FinancialSettings() {
     }).catch(() => { /* use localStorage */ })
   }, [user, sub])
 
-  const SaveBtn = ({ onSave }: { onSave?: () => void }) => (
+  const SaveBtn = ({ onSave, saving }: { onSave?: () => void; saving?: boolean }) => (
     <div className="flex justify-end pt-2">
-      <button onClick={onSave ?? (() => toast.success('تم حفظ الإعدادات'))} className="btn-primary gap-2">
-        <Save className="w-4 h-4" />حفظ التغييرات
+      <button onClick={onSave ?? (() => saveToggles({}))} disabled={saving ?? savingToggles} className="btn-primary gap-2">
+        {(saving ?? savingToggles) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+        حفظ التغييرات
       </button>
     </div>
   )
@@ -194,13 +191,13 @@ export default function FinancialSettings() {
     <div className="space-y-4">
       <SectionCard title="إعدادات الضريبة والزكاة" icon={Percent} iconColor="apple-red">
         <SettingRow icon={QrCode} iconColor="apple-blue" label="تفعيل ZATCA (الفوترة الإلكترونية)" desc="توافق مع هيئة الزكاة والضريبة والجمارك">
-          <Toggle checked={zatca} onChange={setZatca} />
+          <Toggle checked={tog.zatca} onChange={v => saveToggles({ zatca: v }, true)} />
         </SettingRow>
         <SettingRow icon={Hash} iconColor="apple-purple" label="تقريب المبالغ" desc="تقريب المبالغ لأقرب رقمين عشريين">
-          <Toggle checked={roundAmounts} onChange={setRoundAmounts} />
+          <Toggle checked={tog.round_amounts} onChange={v => saveToggles({ round_amounts: v }, true)} />
         </SettingRow>
         <SettingRow icon={Tag} iconColor="apple-green" label="الأسعار شاملة الضريبة" desc="عرض الأسعار شاملة لضريبة القيمة المضافة افتراضياً">
-          <Toggle checked={priceIncTax} onChange={setPriceIncTax} />
+          <Toggle checked={tog.price_inc_tax} onChange={v => saveToggles({ price_inc_tax: v }, true)} />
         </SettingRow>
         <div className="py-3 grid grid-cols-2 gap-4">
           <div>
@@ -243,7 +240,9 @@ export default function FinancialSettings() {
           <p className="text-xs text-muted-foreground">
             {dbAccounts.length > 0
               ? `تم تحميل ${dbAccounts.length} حساب من قاعدة البيانات`
-              : `يتم عرض الحسابات الافتراضية — اضغط "تحميل الشجرة" في صفحة شجرة الحسابات لربطها بقاعدة البيانات`}
+              : acctLoading
+                ? 'جاري تحميل الحسابات من قاعدة البيانات...'
+                : `يتم عرض ${FALLBACK_ACCOUNTS.length} حساب افتراضي — اضغط "تحديث الحسابات" لتحميلها من قاعدة البيانات`}
           </p>
           <button onClick={() => refetch()} disabled={acctLoading}
             className="flex items-center gap-1.5 text-xs text-primary hover:underline">
@@ -254,7 +253,7 @@ export default function FinancialSettings() {
           </button>
         </div>
 
-        {/* Account selectors grid */}
+        {/* Account selectors grid — show FALLBACK_ACCOUNTS immediately, update when DB loads */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 pb-3">
           {DEFAULT_KEYS.map(({ key, label, hint }) => (
             <div key={key}>
@@ -262,15 +261,11 @@ export default function FinancialSettings() {
                 {label}
                 <span className="text-[10px] text-muted-foreground font-normal mr-1">({hint})</span>
               </label>
-              {acctLoading ? (
-                <div className="skeleton h-9 rounded-lg" />
-              ) : (
-                <AccountSelect
-                  value={acctVals[key] ?? ''}
-                  onChange={v => setAcct(key, v)}
-                  accounts={accounts}
-                />
-              )}
+              <AccountSelect
+                value={acctVals[key] ?? ''}
+                onChange={v => setAcct(key, v)}
+                accounts={accounts}
+              />
             </div>
           ))}
         </div>
@@ -301,13 +296,13 @@ export default function FinancialSettings() {
   if (sub === 'payments') return (
     <div className="space-y-4">
       <SectionCard title="طرق الدفع المتاحة" icon={CreditCard} iconColor="apple-blue">
-        <SettingRow label="نقدي" desc="دفع نقدي مباشر"><Toggle checked={cash} onChange={setCash} /></SettingRow>
-        <SettingRow label="مدى" desc="البطاقات المصرفية مدى"><Toggle checked={mada} onChange={setMada} /></SettingRow>
-        <SettingRow label="تحويل بنكي" desc="تحويل مصرفي"><Toggle checked={transfer} onChange={setTransfer} /></SettingRow>
-        <SettingRow label="بطاقة ائتمان" desc="Visa / Mastercard"><Toggle checked={credit} onChange={setCredit} /></SettingRow>
-        <SettingRow label="Visa / Master" desc="بطاقات دولية"><Toggle checked={visa} onChange={setVisa} /></SettingRow>
-        <SettingRow label="STC Pay" desc="محفظة STC الإلكترونية"><Toggle checked={stc} onChange={setStc} /></SettingRow>
-        <SettingRow label="آجل" desc="الدفع الآجل بالأجل"><Toggle checked={deferred} onChange={setDeferred} /></SettingRow>
+        <SettingRow label="نقدي" desc="دفع نقدي مباشر"><Toggle checked={tog.pay_cash} onChange={v => saveToggles({ pay_cash: v }, true)} /></SettingRow>
+        <SettingRow label="مدى" desc="البطاقات المصرفية مدى"><Toggle checked={tog.pay_mada} onChange={v => saveToggles({ pay_mada: v }, true)} /></SettingRow>
+        <SettingRow label="تحويل بنكي" desc="تحويل مصرفي"><Toggle checked={tog.pay_transfer} onChange={v => saveToggles({ pay_transfer: v }, true)} /></SettingRow>
+        <SettingRow label="بطاقة ائتمان" desc="Visa / Mastercard"><Toggle checked={tog.pay_credit} onChange={v => saveToggles({ pay_credit: v }, true)} /></SettingRow>
+        <SettingRow label="Visa / Master" desc="بطاقات دولية"><Toggle checked={tog.pay_visa} onChange={v => saveToggles({ pay_visa: v }, true)} /></SettingRow>
+        <SettingRow label="STC Pay" desc="محفظة STC الإلكترونية"><Toggle checked={tog.pay_stc} onChange={v => saveToggles({ pay_stc: v }, true)} /></SettingRow>
+        <SettingRow label="آجل" desc="الدفع الآجل بالأجل"><Toggle checked={tog.pay_deferred} onChange={v => saveToggles({ pay_deferred: v }, true)} /></SettingRow>
       </SectionCard>
       <SaveBtn />
     </div>
@@ -318,13 +313,13 @@ export default function FinancialSettings() {
     <div className="space-y-4">
       <SectionCard title="إعدادات القيود اليومية" icon={BookOpen} iconColor="apple-teal">
         <SettingRow icon={Zap} iconColor="apple-orange" label="القيود التلقائية" desc="إنشاء قيد محاسبي تلقائياً عند كل عملية">
-          <Toggle checked={autoJournal} onChange={setAutoJournal} />
+          <Toggle checked={tog.auto_journal} onChange={v => saveToggles({ auto_journal: v }, true)} />
         </SettingRow>
         <SettingRow icon={QrCode} iconColor="apple-purple" label="يتطلب موافقة قبل الترحيل" desc="مراجعة القيد قبل ترحيله للحسابات">
-          <Toggle checked={requireApproval} onChange={setRequireApproval} />
+          <Toggle checked={tog.require_approval} onChange={v => saveToggles({ require_approval: v }, true)} />
         </SettingRow>
         <SettingRow icon={Hash} iconColor="apple-blue" label="ترحيل تلقائي" desc="ترحيل القيود تلقائياً عند الحفظ">
-          <Toggle checked={autoPost} onChange={setAutoPost} />
+          <Toggle checked={tog.auto_post} onChange={v => saveToggles({ auto_post: v }, true)} />
         </SettingRow>
         <div className="py-3 grid grid-cols-2 gap-4">
           <div>
@@ -359,5 +354,5 @@ export default function FinancialSettings() {
     </div>
   )
 
-  return null
+  return <Navigate to="/settings/financial/tax" replace />
 }

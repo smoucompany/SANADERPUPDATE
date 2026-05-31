@@ -1,6 +1,10 @@
 import { useState } from 'react'
-import { Calendar, Lock, Unlock, Plus, CheckCircle2, Clock, AlertTriangle } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Calendar, Lock, Unlock, Plus, CheckCircle2, Clock, AlertTriangle, Loader2, Save } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/authStore'
 import PageHeader from '@/components/shared/PageHeader'
+import Modal from '@/components/shared/Modal'
 import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -16,42 +20,100 @@ interface Period {
   closed_at?: string
 }
 
-const MOCK_PERIODS: Period[] = [
-  { id: '1', name: 'يناير 2026',  start_date: '2026-01-01', end_date: '2026-01-31', status: 'locked', entries_count: 142, closing_balance: 850000,  closed_by: 'أحمد العمري',  closed_at: '2026-02-05' },
-  { id: '2', name: 'فبراير 2026', start_date: '2026-02-01', end_date: '2026-02-28', status: 'locked', entries_count: 118, closing_balance: 920000,  closed_by: 'أحمد العمري',  closed_at: '2026-03-03' },
-  { id: '3', name: 'مارس 2026',   start_date: '2026-03-01', end_date: '2026-03-31', status: 'closed', entries_count: 156, closing_balance: 1050000, closed_by: 'سارة المالكي', closed_at: '2026-04-02' },
-  { id: '4', name: 'أبريل 2026',  start_date: '2026-04-01', end_date: '2026-04-30', status: 'closed', entries_count: 133, closing_balance: 980000,  closed_by: 'سارة المالكي', closed_at: '2026-05-04' },
-  { id: '5', name: 'مايو 2026',   start_date: '2026-05-01', end_date: '2026-05-31', status: 'open',   entries_count: 87,  closing_balance: 0 },
-  { id: '6', name: 'يونيو 2026',  start_date: '2026-06-01', end_date: '2026-06-30', status: 'open',   entries_count: 0,   closing_balance: 0 },
-]
-
 const STATUS_MAP: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   open:   { label: 'مفتوح',   color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30', icon: Unlock },
   closed: { label: 'مغلق',    color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30',       icon: Lock },
   locked: { label: 'مقفل',    color: 'text-muted-foreground bg-muted',                         icon: Lock },
 }
 
+const EMPTY_FORM = { name: '', start_date: '', end_date: '' }
+
 export default function AccountingPeriodsPage() {
-  const [periods, setPeriods] = useState(MOCK_PERIODS)
+  const { user } = useAuthStore()
+  const qc = useQueryClient()
   const [confirmClose, setConfirmClose] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
 
-  const handleClose = (id: string) => {
-    setPeriods(prev => prev.map(p =>
-      p.id === id ? { ...p, status: 'closed', closed_by: 'المستخدم الحالي', closed_at: new Date().toISOString().slice(0, 10) } : p
-    ))
-    toast.success('تم إغلاق الفترة المحاسبية')
-    setConfirmClose(null)
-  }
+  // ── Fetch periods ─────────────────────────────────────────────────────────
+  const { data: periods = [], isLoading } = useQuery<Period[]>({
+    queryKey: ['accounting_periods', user?.company_id],
+    queryFn: async () => {
+      if (!user) return []
+      const { data, error } = await supabase
+        .from('accounting_periods')
+        .select('*')
+        .eq('company_id', user.company_id)
+        .order('start_date', { ascending: false })
+      if (error) throw error
+      return (data as Period[]) || []
+    },
+    enabled: !!user,
+  })
 
-  const handleReopen = (id: string) => {
-    setPeriods(prev => prev.map(p => p.id === id ? { ...p, status: 'open', closed_by: undefined, closed_at: undefined } : p))
-    toast.success('تم إعادة فتح الفترة المحاسبية')
-  }
+  // ── Create period ─────────────────────────────────────────────────────────
+  const createPeriod = useMutation({
+    mutationFn: async () => {
+      if (!form.name || !form.start_date || !form.end_date) throw new Error('جميع الحقول مطلوبة')
+      const { error } = await supabase.from('accounting_periods').insert({
+        company_id:      user!.company_id,
+        name:            form.name,
+        start_date:      form.start_date,
+        end_date:        form.end_date,
+        status:          'open',
+        entries_count:   0,
+        closing_balance: 0,
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accounting_periods'] })
+      toast.success('تم إنشاء الفترة المحاسبية')
+      setShowForm(false)
+      setForm(EMPTY_FORM)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  const open   = periods.filter(p => p.status === 'open').length
-  const closed = periods.filter(p => p.status === 'closed').length
-  const locked = periods.filter(p => p.status === 'locked').length
-  const entries= periods.reduce((s, p) => s + p.entries_count, 0)
+  // ── Close period ──────────────────────────────────────────────────────────
+  const closePeriod = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('accounting_periods').update({
+        status:    'closed',
+        closed_by: user?.full_name || 'المستخدم',
+        closed_at: new Date().toISOString().slice(0, 10),
+      }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accounting_periods'] })
+      toast.success('تم إغلاق الفترة المحاسبية')
+      setConfirmClose(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  // ── Reopen period ─────────────────────────────────────────────────────────
+  const reopenPeriod = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('accounting_periods').update({
+        status:    'open',
+        closed_by: null,
+        closed_at: null,
+      }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accounting_periods'] })
+      toast.success('تم إعادة فتح الفترة المحاسبية')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const open    = periods.filter(p => p.status === 'open').length
+  const closed  = periods.filter(p => p.status === 'closed').length
+  const locked  = periods.filter(p => p.status === 'locked').length
+  const entries = periods.reduce((s, p) => s + (p.entries_count || 0), 0)
 
   return (
     <div className="space-y-5">
@@ -59,7 +121,7 @@ export default function AccountingPeriodsPage() {
         title="الفترات المحاسبية"
         subtitle="إدارة فترات وأعوام السنة المالية"
         actions={
-          <button onClick={() => toast.success('إنشاء فترة محاسبية جديدة')} className="btn-primary gap-1.5">
+          <button onClick={() => setShowForm(true)} className="btn-primary gap-1.5">
             <Plus className="w-4 h-4" />فترة جديدة
           </button>
         }
@@ -86,75 +148,80 @@ export default function AccountingPeriodsPage() {
       {/* Periods timeline */}
       <div className="bg-card border border-border/60 rounded-2xl overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border/50">
-          <h3 className="font-semibold">السنة المالية 2026</h3>
+          <h3 className="font-semibold">الفترات المحاسبية ({periods.length})</h3>
         </div>
 
-        <div className="divide-y divide-border/40">
-          {periods.map(period => {
-            const s = STATUS_MAP[period.status]
-            const StatusIcon = s.icon
-            return (
-              <div key={period.id} className="flex items-center gap-4 px-5 py-4 hover:bg-muted/20">
-                {/* Status indicator */}
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                  period.status === 'open' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' :
-                  period.status === 'closed' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' :
-                  'bg-muted text-muted-foreground'
-                }`}>
-                  <StatusIcon className="w-4 h-4" />
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold">{period.name}</p>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${s.color}`}>
-                      {s.label}
-                    </span>
+        {isLoading ? (
+          <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+        ) : periods.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <Calendar className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p>لا توجد فترات محاسبية — أنشئ فترة جديدة</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border/40">
+            {periods.map(period => {
+              const s = STATUS_MAP[period.status]
+              const StatusIcon = s.icon
+              return (
+                <div key={period.id} className="flex items-center gap-4 px-5 py-4 hover:bg-muted/20">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    period.status === 'open'   ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' :
+                    period.status === 'closed' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' :
+                    'bg-muted text-muted-foreground'
+                  }`}>
+                    <StatusIcon className="w-4 h-4" />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {formatDate(period.start_date)} — {formatDate(period.end_date)}
-                    {period.entries_count > 0 && ` · ${period.entries_count} قيد محاسبي`}
-                  </p>
-                  {period.closed_at && (
-                    <p className="text-xs text-muted-foreground/60 mt-0.5">
-                      أُغلق في {formatDate(period.closed_at)} بواسطة {period.closed_by}
-                    </p>
-                  )}
-                </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {period.status === 'open' && period.entries_count > 0 && (
-                    confirmClose === period.id ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-amber-600">تأكيد الإغلاق؟</span>
-                        <button onClick={() => handleClose(period.id)} className="text-xs font-medium text-red-500 hover:underline">نعم</button>
-                        <button onClick={() => setConfirmClose(null)} className="text-xs text-muted-foreground hover:underline">إلغاء</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setConfirmClose(period.id)}
-                        className="flex items-center gap-1.5 text-xs font-medium text-amber-600 hover:text-amber-700 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1 rounded-lg">
-                        <Lock className="w-3 h-3" />إغلاق الفترة
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold">{period.name}</p>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${s.color}`}>{s.label}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {formatDate(period.start_date)} — {formatDate(period.end_date)}
+                      {period.entries_count > 0 && ` · ${period.entries_count} قيد محاسبي`}
+                    </p>
+                    {period.closed_at && (
+                      <p className="text-xs text-muted-foreground/60 mt-0.5">
+                        أُغلق في {formatDate(period.closed_at)} بواسطة {period.closed_by}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {period.status === 'open' && (
+                      confirmClose === period.id ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-amber-600">تأكيد الإغلاق؟</span>
+                          <button onClick={() => closePeriod.mutate(period.id)} disabled={closePeriod.isPending}
+                            className="text-xs font-medium text-red-500 hover:underline">نعم</button>
+                          <button onClick={() => setConfirmClose(null)} className="text-xs text-muted-foreground hover:underline">إلغاء</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setConfirmClose(period.id)}
+                          className="flex items-center gap-1.5 text-xs font-medium text-amber-600 hover:text-amber-700 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1 rounded-lg">
+                          <Lock className="w-3 h-3" />إغلاق الفترة
+                        </button>
+                      )
+                    )}
+                    {period.status === 'closed' && (
+                      <button onClick={() => reopenPeriod.mutate(period.id)} disabled={reopenPeriod.isPending}
+                        className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2.5 py-1 rounded-lg">
+                        <Unlock className="w-3 h-3" />إعادة الفتح
                       </button>
-                    )
-                  )}
-                  {period.status === 'closed' && (
-                    <button onClick={() => handleReopen(period.id)}
-                      className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-2.5 py-1 rounded-lg">
-                      <Unlock className="w-3 h-3" />إعادة الفتح
-                    </button>
-                  )}
-                  {period.status === 'locked' && (
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Lock className="w-3 h-3" />مقفل نهائياً
-                    </span>
-                  )}
+                    )}
+                    {period.status === 'locked' && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Lock className="w-3 h-3" />مقفل نهائياً
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Warning */}
@@ -167,6 +234,36 @@ export default function AccountingPeriodsPage() {
           </p>
         </div>
       </div>
+
+      {/* Create Period Modal */}
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="إنشاء فترة محاسبية جديدة">
+        <div className="space-y-4 p-1">
+          <div>
+            <label className="form-label">اسم الفترة *</label>
+            <input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
+              className="form-input" placeholder="مثال: يناير 2026" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="form-label">تاريخ البداية *</label>
+              <input type="date" value={form.start_date} onChange={e => setForm(f => ({...f, start_date: e.target.value}))}
+                className="form-input" dir="ltr" />
+            </div>
+            <div>
+              <label className="form-label">تاريخ النهاية *</label>
+              <input type="date" value={form.end_date} onChange={e => setForm(f => ({...f, end_date: e.target.value}))}
+                className="form-input" dir="ltr" />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <button onClick={() => setShowForm(false)} className="btn-outline">إلغاء</button>
+            <button onClick={() => createPeriod.mutate()} disabled={createPeriod.isPending} className="btn-primary gap-2">
+              {createPeriod.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              إنشاء الفترة
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

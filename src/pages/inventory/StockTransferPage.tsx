@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, ArrowLeftRight, Package, Loader2, Warehouse, Save } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -13,13 +13,11 @@ const emptyItem = (): TransferItem => ({ product_name: '', qty: 1, unit: 'قطع
 
 const WAREHOUSES = ['المخزن الرئيسي', 'مخزن الفرع الأول', 'مخزن الفرع الثاني', 'مخزن المرتجعات']
 
-const MOCK_TRANSFERS = [
-  { id: '1', number: 'TRF-001', from: 'المخزن الرئيسي', to: 'مخزن الفرع الأول', date: '2026-05-20', items: 5, status: 'مكتمل' },
-  { id: '2', number: 'TRF-002', from: 'مخزن الفرع الثاني', to: 'المخزن الرئيسي', date: '2026-05-25', items: 3, status: 'قيد التنفيذ' },
-]
+const transfers: { id: string; number: string; from: string; to: string; date: string; items: number; status: string }[] = []
 
 export default function StockTransferPage() {
   const { user } = useAuthStore()
+  const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ from: '', to: '', date: new Date().toISOString().slice(0,10), notes: '' })
   const [items, setItems] = useState<TransferItem[]>([emptyItem()])
@@ -34,7 +32,21 @@ export default function StockTransferPage() {
       const { data } = await supabase.from('products').select('id,name_ar').eq('company_id', user!.company_id).order('name_ar').limit(200)
       return data || []
     },
-    enabled: !!user
+    enabled: !!user,
+  })
+
+  const { data: transfers = [] } = useQuery<any[]>({
+    queryKey: ['stock_transfers', user?.company_id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('stock_transfers')
+        .select('*, items:stock_transfer_items(count)')
+        .eq('company_id', user!.company_id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      return data || []
+    },
+    enabled: !!user,
   })
 
   const handleSave = async () => {
@@ -42,12 +54,45 @@ export default function StockTransferPage() {
     if (form.from === form.to) { toast.error('المخزن المصدر والوجهة مختلفان'); return }
     if (items.some(i => !i.product_name)) { toast.error('أدخل جميع المنتجات'); return }
     setSaving(true)
-    await new Promise(r => setTimeout(r, 800))
-    setSaving(false)
-    toast.success('تم إنشاء أمر التحويل بنجاح')
-    setShowForm(false)
-    setForm({ from: '', to: '', date: new Date().toISOString().slice(0,10), notes: '' })
-    setItems([emptyItem()])
+    try {
+      const transferNumber = `TRF-${Date.now().toString().slice(-6)}`
+      const { data: transfer, error } = await supabase
+        .from('stock_transfers')
+        .insert({
+          company_id: user!.company_id,
+          transfer_number: transferNumber,
+          from_warehouse: form.from,
+          to_warehouse: form.to,
+          transfer_date: form.date,
+          notes: form.notes,
+          status: 'completed',
+          items_count: items.length,
+        })
+        .select('id')
+        .single()
+      if (error) throw error
+
+      if (transfer?.id) {
+        const itemRows = items.map(it => ({
+          transfer_id: transfer.id,
+          product_name: it.product_name,
+          quantity: it.qty,
+          unit: it.unit,
+        }))
+        const { error: itemsErr } = await supabase.from('stock_transfer_items').insert(itemRows)
+        if (itemsErr) throw itemsErr
+      }
+
+      toast.success('تم إنشاء أمر التحويل بنجاح')
+      qc.invalidateQueries({ queryKey: ['stock_transfers'] })
+      setShowForm(false)
+      setForm({ from: '', to: '', date: new Date().toISOString().slice(0,10), notes: '' })
+      setItems([emptyItem()])
+    } catch (e: any) {
+      toast.error(e.message || 'خطأ في حفظ أمر التحويل')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -160,38 +205,38 @@ export default function StockTransferPage() {
             </tr>
           </thead>
           <tbody>
-            {MOCK_TRANSFERS.map(t => (
+            {transfers.map((t: any) => (
               <tr key={t.id} className="border-t border-border/40 hover:bg-muted/20">
-                <td className="px-5 py-3 font-mono text-primary font-semibold">{t.number}</td>
+                <td className="px-5 py-3 font-mono text-primary font-semibold">{t.transfer_number || t.id?.slice(0,8)}</td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-1.5">
                     <Warehouse className="w-3.5 h-3.5 text-muted-foreground" />
-                    {t.from}
+                    {t.from_warehouse}
                   </div>
                 </td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-1.5">
                     <Warehouse className="w-3.5 h-3.5 text-teal-500" />
-                    {t.to}
+                    {t.to_warehouse}
                   </div>
                 </td>
-                <td className="px-5 py-3 text-muted-foreground">{formatDate(t.date)}</td>
+                <td className="px-5 py-3 text-muted-foreground">{formatDate(t.transfer_date || t.created_at)}</td>
                 <td className="px-5 py-3">
                   <div className="flex items-center gap-1.5">
                     <Package className="w-3.5 h-3.5 text-muted-foreground" />
-                    {t.items} صنف
+                    {t.items_count || t.items?.[0]?.count || 0} صنف
                   </div>
                 </td>
                 <td className="px-5 py-3">
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${t.status === 'مكتمل' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30'}`}>
-                    {t.status}
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${t.status === 'completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30'}`}>
+                    {t.status === 'completed' ? 'مكتمل' : 'قيد التنفيذ'}
                   </span>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {MOCK_TRANSFERS.length === 0 && (
+        {transfers.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <ArrowLeftRight className="w-8 h-8 mx-auto mb-2 opacity-30" />
             <p>لا توجد تحويلات بعد</p>

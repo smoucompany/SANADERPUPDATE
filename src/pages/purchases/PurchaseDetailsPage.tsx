@@ -1,246 +1,436 @@
+import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, Printer, Edit2, Download, CheckCircle2, Clock, XCircle, AlertCircle, Package } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import {
+  ArrowRight, Edit2, Trash2, CheckCircle, Lock, Unlock,
+  Printer, FileText, AlertCircle, Package, Loader2, Eye
+} from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
+import StatusBadge from '@/components/shared/StatusBadge'
+import toast from 'react-hot-toast'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-const STATUS_MAP: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  draft:     { label: 'مسودة',     color: 'text-gray-600 bg-gray-100 dark:bg-gray-800',            icon: Clock },
-  confirmed: { label: 'مؤكدة',     color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30',          icon: CheckCircle2 },
-  received:  { label: 'مستلمة',    color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30', icon: CheckCircle2 },
-  partial:   { label: 'جزئي',      color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30',       icon: AlertCircle },
-  cancelled: { label: 'ملغاة',     color: 'text-red-600 bg-red-100 dark:bg-red-900/30',             icon: XCircle },
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'نقدي (خزينة رئيسية)', mada: 'بطاقة / فيزا',
+  transfer: 'تحويل بنكي', deferred: 'آجل', credit: 'ائتمان'
 }
 
 export default function PurchaseDetailsPage() {
-  const { id } = useParams()
+  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { user } = useAuthStore()
+  const { company, user } = useAuthStore()
+  const queryClient = useQueryClient()
 
-  const { data: purchase, isLoading } = useQuery({
-    queryKey: ['purchase', id],
+  const [loading, setLoading]                   = useState(false)
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [adminPassword, setAdminPassword]       = useState('')
+  const [deleteReason, setDeleteReason]         = useState('')
+
+  const { data: purchase, isLoading, refetch } = useQuery({
+    queryKey: ['purchase-detail', id],
     queryFn: async () => {
+      if (!id) return null
       const { data, error } = await supabase
         .from('purchases')
-        .select('*, supplier:suppliers(*), items:purchase_items(*, product:products(name_ar, barcode, unit))')
-        .eq('id', id!)
-        .eq('company_id', user!.company_id)
+        .select(`
+          *,
+          supplier:suppliers(id, name_ar, phone, balance),
+          items:purchase_items(*),
+          locked_user:users!locked_by(full_name),
+          confirmed_user:users!confirmed_by(full_name)
+        `)
+        .eq('id', id)
         .single()
       if (error) throw error
       return data
     },
-    enabled: !!id && !!user
+    enabled: !!id
   })
 
-  const status = STATUS_MAP[purchase?.status || 'draft']
-  const StatusIcon = status?.icon || Clock
+  const handleApprove = async () => {
+    if (!purchase || !user) return
+    if (!purchase.supplier_id) return toast.error('يجب أن يكون للفاتورة مورد')
 
-  if (isLoading) return (
-    <div className="space-y-4">
-      {[...Array(5)].map((_, i) => <div key={i} className="h-16 bg-muted rounded-2xl animate-pulse" />)}
-    </div>
-  )
+    setLoading(true)
+    try {
+      const { data, error } = await supabase.rpc('approve_purchase', {
+        p_purchase_id: purchase.id,
+        p_user_id: user.id
+      })
 
-  if (!purchase) return (
-    <div className="text-center py-20 text-muted-foreground">
-      <Package className="w-10 h-10 mx-auto mb-3 opacity-30" />
-      <p>لم يتم العثور على فاتورة الشراء</p>
-      <button onClick={() => navigate('/purchases')} className="btn-outline mt-4 gap-1.5">
-        <ArrowRight className="w-4 h-4" />العودة للمشتريات
-      </button>
-    </div>
-  )
+      if (error) throw error
+      if (!data?.success) throw new Error(data?.message || 'فشل الاعتماد')
+
+      toast.success('✅ تم اعتماد الفاتورة وترحيلها للمخزن والحسابات')
+      refetch()
+      queryClient.invalidateQueries({ queryKey: ['purchases'] })
+    } catch (err: any) {
+      toast.error(err.message || 'حدث خطأ أثناء الاعتماد')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUnlock = async () => {
+    if (adminPassword !== 'Admin@123') {
+      toast.error('كلمة المرور غير صحيحة')
+      return
+    }
+    setLoading(true)
+    try {
+      await supabase.from('purchases').update({
+        is_locked: false, updated_at: new Date().toISOString()
+      }).eq('id', id!)
+
+      toast.success('تم فك قفل الفاتورة')
+      setShowUnlockDialog(false)
+      setAdminPassword('')
+      refetch()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (purchase?.is_locked && adminPassword !== 'Admin@123') {
+      toast.error('كلمة المرور غير صحيحة')
+      return
+    }
+    setLoading(true)
+    try {
+      const { data, error } = await supabase.rpc('reverse_purchase', {
+        p_purchase_id: purchase!.id,
+        p_user_id: user!.id,
+        p_reason: deleteReason || null
+      })
+
+      if (error) throw error
+      if (!data?.success) throw new Error(data?.message)
+
+      toast.success('تم نقل الفاتورة للمحذوفات وعكس آثارها')
+      navigate('/purchases')
+    } catch (err: any) {
+      toast.error(err.message || 'حدث خطأ')
+    } finally {
+      setLoading(false)
+      setShowDeleteDialog(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="animate-spin text-blue-600" size={36} />
+      </div>
+    )
+  }
+
+  if (!purchase) {
+    return (
+      <div className="text-center py-20 text-gray-400" dir="rtl">
+        <FileText size={48} className="mx-auto mb-3 opacity-30" />
+        <p>الفاتورة غير موجودة</p>
+        <button onClick={() => navigate('/purchases')}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">
+          العودة للقائمة
+        </button>
+      </div>
+    )
+  }
+
+  const isApproved = purchase.status !== 'draft'
+  const isLocked   = purchase.is_locked
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6" dir="rtl">
       <PageHeader
-        title={`فاتورة شراء ${purchase.purchase_number || purchase.id?.slice(0, 8)}`}
-        subtitle={formatDate(purchase.purchase_date || purchase.created_at)}
+        title={`فاتورة مشتريات: ${purchase.purchase_number}`}
+        subtitle={`${purchase.supplier?.name_ar || 'بدون مورد'} — ${formatDate(purchase.purchase_date)}`}
         actions={
-          <>
-            <button onClick={() => navigate('/purchases')} className="btn-outline gap-1.5">
-              <ArrowRight className="w-4 h-4" />رجوع
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => navigate('/purchases')}
+              className="flex items-center gap-2 px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+              <ArrowRight size={14} /> رجوع
             </button>
-            <button onClick={() => window.print()} className="btn-outline gap-1.5">
-              <Printer className="w-4 h-4" />طباعة
+
+            {!isLocked && (
+              <button onClick={() => navigate(`/purchases/${id}/edit`)}
+                className="flex items-center gap-2 px-3 py-2 border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 text-sm">
+                <Edit2 size={14} /> تعديل
+              </button>
+            )}
+
+            {!isApproved && (
+              <button onClick={handleApprove} disabled={loading}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                اعتماد وترحيل
+              </button>
+            )}
+
+            {isLocked && (
+              <button onClick={() => setShowUnlockDialog(true)}
+                className="flex items-center gap-2 px-3 py-2 border border-amber-300 text-amber-600 rounded-lg hover:bg-amber-50 text-sm">
+                <Unlock size={14} /> فك القفل
+              </button>
+            )}
+
+            <button onClick={() => setShowDeleteDialog(true)}
+              className="flex items-center gap-2 px-3 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 text-sm">
+              <Trash2 size={14} /> حذف
             </button>
-            <button onClick={() => navigate(`/purchases/${id}/edit`)} className="btn-primary gap-1.5">
-              <Edit2 className="w-4 h-4" />تعديل
+
+            <button onClick={() => window.print()}
+              className="flex items-center gap-2 px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+              <Printer size={14} /> طباعة
             </button>
-          </>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
-        {/* Main content */}
-        <div className="space-y-5">
-          {/* Header info */}
-          <div className="bg-card border border-border/60 rounded-2xl p-6">
-            <div className="flex items-start justify-between mb-6">
+      {/* شارة الحالة */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <StatusBadge status={purchase.status} />
+        {isLocked && (
+          <span className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-medium">
+            <Lock size={13} /> مقفلة ومعتمدة
+          </span>
+        )}
+        {purchase.is_posted && (
+          <span className="flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+            <CheckCircle size={13} /> مرحّلة للمخزن والحسابات
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* تفاصيل الفاتورة */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border p-6">
+            <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+              <FileText size={18} className="text-blue-600" />
+              بيانات الفاتورة
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
               <div>
-                <p className="text-3xl font-black text-foreground">
-                  {purchase.purchase_number || `#${purchase.id?.slice(0, 8).toUpperCase()}`}
-                </p>
-                <p className="text-muted-foreground mt-1">{formatDate(purchase.purchase_date || purchase.created_at)}</p>
+                <div className="text-gray-500 text-xs mb-1">رقم الفاتورة</div>
+                <div className="font-mono font-bold text-blue-700">{purchase.purchase_number}</div>
               </div>
-              <span className={`flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full ${status?.color}`}>
-                <StatusIcon className="w-4 h-4" />
-                {status?.label}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { label: 'المورد', value: purchase.supplier?.name_ar || '—' },
-                { label: 'طريقة الدفع', value: purchase.payment_method === 'cash' ? 'نقدي' : purchase.payment_method === 'credit' ? 'آجل' : (purchase.payment_method || '—') },
-                { label: 'تاريخ الاستحقاق', value: purchase.due_date ? formatDate(purchase.due_date) : '—' },
-                { label: 'رقم المرجع', value: purchase.reference || '—' },
-              ].map(f => (
-                <div key={f.label}>
-                  <p className="text-xs text-muted-foreground">{f.label}</p>
-                  <p className="font-semibold mt-0.5">{f.value}</p>
+              <div>
+                <div className="text-gray-500 text-xs mb-1">تاريخ الفاتورة</div>
+                <div className="font-medium">{formatDate(purchase.purchase_date)}</div>
+              </div>
+              {purchase.due_date && (
+                <div>
+                  <div className="text-gray-500 text-xs mb-1">تاريخ الاستحقاق</div>
+                  <div className="font-medium">{formatDate(purchase.due_date)}</div>
                 </div>
-              ))}
+              )}
+              <div>
+                <div className="text-gray-500 text-xs mb-1">طريقة الدفع</div>
+                <div className="font-medium">{PAYMENT_LABELS[purchase.payment_method] || purchase.payment_method}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-xs mb-1">الحالة</div>
+                <StatusBadge status={purchase.status} />
+              </div>
+              {purchase.confirmed_user?.full_name && (
+                <div>
+                  <div className="text-gray-500 text-xs mb-1">اعتمد بواسطة</div>
+                  <div className="font-medium">{purchase.confirmed_user.full_name}</div>
+                </div>
+              )}
             </div>
+            {purchase.notes && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
+                <span className="font-medium">ملاحظات: </span>{purchase.notes}
+              </div>
+            )}
           </div>
 
-          {/* Items table */}
-          <div className="bg-card border border-border/60 rounded-2xl overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-border/50">
-              <h3 className="font-semibold">بنود فاتورة الشراء</h3>
+          {/* جدول الأصناف */}
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center gap-2">
+              <Package size={18} className="text-blue-600" />
+              <h3 className="font-semibold text-gray-800">الأصناف ({purchase.items?.length || 0})</h3>
             </div>
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground">#</th>
-                  <th className="text-right px-5 py-3 text-xs font-semibold text-muted-foreground">المنتج</th>
-                  <th className="text-center px-5 py-3 text-xs font-semibold text-muted-foreground">الكمية</th>
-                  <th className="text-center px-5 py-3 text-xs font-semibold text-muted-foreground">سعر الوحدة</th>
-                  <th className="text-center px-5 py-3 text-xs font-semibold text-muted-foreground">الخصم</th>
-                  <th className="text-center px-5 py-3 text-xs font-semibold text-muted-foreground">الإجمالي</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(purchase.items || []).map((item: any, i: number) => (
-                  <tr key={item.id || i} className="border-t border-border/40 hover:bg-muted/20">
-                    <td className="px-5 py-3 text-muted-foreground">{i + 1}</td>
-                    <td className="px-5 py-3">
-                      <p className="font-medium">{item.product?.name_ar || item.product_name || '—'}</p>
-                      {item.product?.barcode && <p className="text-xs text-muted-foreground font-mono">{item.product.barcode}</p>}
-                    </td>
-                    <td className="px-5 py-3 text-center">{item.quantity} {item.product?.unit || item.unit || ''}</td>
-                    <td className="px-5 py-3 text-center">{formatCurrency(item.unit_price || item.cost || 0)}</td>
-                    <td className="px-5 py-3 text-center">{item.discount ? `${item.discount}%` : '—'}</td>
-                    <td className="px-5 py-3 text-center font-bold">{formatCurrency(item.total || (item.quantity * (item.unit_price || item.cost || 0)))}</td>
-                  </tr>
-                ))}
-                {(!purchase.items || purchase.items.length === 0) && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
+                <thead className="bg-gray-50">
                   <tr>
-                    <td colSpan={6} className="px-5 py-10 text-center text-muted-foreground text-sm">لا توجد بنود</td>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">#</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">الصنف</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">الصلاحية</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">الدفعة</th>
+                    <th className="text-center px-4 py-3 font-medium text-gray-600">الكمية</th>
+                    <th className="text-center px-4 py-3 font-medium text-gray-600">السعر</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">الإجمالي</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-
-            {/* Totals */}
-            <div className="px-5 py-4 border-t border-border/50 bg-muted/20">
-              <div className="max-w-xs mr-auto space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">المجموع الفرعي</span>
-                  <span className="font-medium">{formatCurrency(purchase.subtotal || 0)}</span>
-                </div>
-                {(purchase.discount_amount || 0) > 0 && (
-                  <div className="flex justify-between text-red-500">
-                    <span>الخصم</span>
-                    <span>- {formatCurrency(purchase.discount_amount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">الضريبة {purchase.vat_rate || 15}%</span>
-                  <span className="font-medium">{formatCurrency(purchase.tax_amount || 0)}</span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-border font-bold text-base">
-                  <span>الإجمالي</span>
-                  <span className="text-primary">{formatCurrency(purchase.total || 0)}</span>
-                </div>
-                <div className="flex justify-between text-emerald-600">
-                  <span>المدفوع</span>
-                  <span className="font-bold">{formatCurrency(purchase.paid_amount || 0)}</span>
-                </div>
-                {(purchase.remaining_amount || 0) > 0 && (
-                  <div className="flex justify-between text-orange-500 font-bold">
-                    <span>المتبقي</span>
-                    <span>{formatCurrency(purchase.remaining_amount)}</span>
-                  </div>
-                )}
+                </thead>
+                <tbody className="divide-y">
+                  {purchase.items?.map((item: any, idx: number) => (
+                    <tr key={item.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-gray-400 text-center">{idx + 1}</td>
+                      <td className="px-4 py-3 font-medium">{item.product_name}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {item.expiry_date ? (
+                          <span className={new Date(item.expiry_date) < new Date() ? 'text-red-600' : 'text-green-600'}>
+                            {formatDate(item.expiry_date)}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">{item.batch_number || '—'}</td>
+                      <td className="px-4 py-3 text-center">{item.quantity}</td>
+                      <td className="px-4 py-3 text-center">{formatCurrency(item.unit_price)}</td>
+                      <td className="px-4 py-3 text-left font-medium text-blue-700">{formatCurrency(item.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t p-4 space-y-2 bg-gray-50">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">الإجمالي قبل الضريبة:</span>
+                <span>{formatCurrency(purchase.subtotal)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">الضريبة:</span>
+                <span className="text-orange-600">{formatCurrency(purchase.tax_amount)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-lg border-t pt-2">
+                <span>الإجمالي الكلي:</span>
+                <span className="text-blue-700">{formatCurrency(purchase.total)}</span>
               </div>
             </div>
           </div>
-
-          {purchase.notes && (
-            <div className="bg-card border border-border/60 rounded-2xl p-5">
-              <h3 className="font-semibold mb-2 text-sm text-muted-foreground">ملاحظات</h3>
-              <p className="text-sm">{purchase.notes}</p>
-            </div>
-          )}
         </div>
 
-        {/* Sidebar */}
+        {/* الجانب الأيسر */}
         <div className="space-y-4">
-          {purchase.supplier && (
-            <div className="bg-card border border-border/60 rounded-2xl p-5">
-              <h3 className="font-semibold mb-3">بيانات المورد</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-9 h-9 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 font-bold text-sm">
-                    {purchase.supplier.name_ar?.charAt(0)}
-                  </div>
-                  <div>
-                    <p className="font-semibold">{purchase.supplier.name_ar}</p>
-                    <p className="text-xs text-muted-foreground">{purchase.supplier.phone || '—'}</p>
-                  </div>
+          <div className="bg-white rounded-xl shadow-sm border p-5">
+            <h4 className="font-semibold text-gray-800 mb-4">بيانات المورد</h4>
+            {purchase.supplier ? (
+              <div className="space-y-3 text-sm">
+                <div className="font-semibold text-lg">{purchase.supplier.name_ar}</div>
+                {purchase.supplier.phone && <div className="text-gray-500">{purchase.supplier.phone}</div>}
+                <div className={`font-bold text-lg ${purchase.supplier.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  الرصيد: {formatCurrency(purchase.supplier.balance || 0)}
                 </div>
-                {purchase.supplier.email && <p className="text-muted-foreground text-xs">{purchase.supplier.email}</p>}
-                {purchase.supplier.address && <p className="text-muted-foreground text-xs">{purchase.supplier.address}</p>}
-                {purchase.supplier.tax_number && (
-                  <p className="text-xs text-muted-foreground">رقم ضريبي: <span className="font-mono">{purchase.supplier.tax_number}</span></p>
-                )}
+                <button onClick={() => navigate(`/suppliers/${purchase.supplier.id}/statement`)}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+                  <Eye size={14} /> كشف حساب المورد
+                </button>
               </div>
-            </div>
-          )}
+            ) : <p className="text-gray-400 text-sm">لا توجد بيانات مورد</p>}
+          </div>
 
-          <div className="bg-card border border-border/60 rounded-2xl p-5">
-            <h3 className="font-semibold mb-3">ملخص المبالغ</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-border/40">
-                <span className="text-sm text-muted-foreground">إجمالي الفاتورة</span>
-                <span className="font-bold">{formatCurrency(purchase.total || 0)}</span>
+          <div className="bg-white rounded-xl shadow-sm border p-5">
+            <h4 className="font-semibold text-gray-800 mb-4">ملخص الدفع</h4>
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">الإجمالي:</span>
+                <span className="font-bold text-blue-700">{formatCurrency(purchase.total)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-border/40">
-                <span className="text-sm text-muted-foreground">المدفوع</span>
-                <span className="font-bold text-emerald-600">{formatCurrency(purchase.paid_amount || 0)}</span>
+              <div className="flex justify-between">
+                <span className="text-gray-600">المدفوع:</span>
+                <span className="font-medium text-green-600">{formatCurrency(purchase.paid_amount || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-sm font-semibold">الرصيد المتبقي</span>
-                <span className={`font-bold text-lg ${(purchase.remaining_amount || 0) > 0 ? 'text-orange-500' : 'text-emerald-600'}`}>
+              <div className="flex justify-between border-t pt-2">
+                <span className="text-gray-600">المتبقي:</span>
+                <span className={`font-bold ${(purchase.remaining_amount || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
                   {formatCurrency(purchase.remaining_amount || 0)}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <button onClick={() => window.print()} className="btn-outline gap-2 w-full">
-              <Printer className="w-4 h-4" />طباعة الفاتورة
-            </button>
-            <button className="btn-outline gap-2 w-full">
-              <Download className="w-4 h-4" />تحميل PDF
-            </button>
-          </div>
+          {!isApproved && (
+            <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
+              <div className="flex items-start gap-2 text-blue-700 text-sm">
+                <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="font-semibold mb-1">عند الاعتماد:</div>
+                  <ul className="space-y-1 text-xs text-blue-600 list-disc list-inside">
+                    <li>ترحيل للمخزن الوارد (1)</li>
+                    <li>قيد محاسبي تلقائي</li>
+                    <li>تحديث رصيد المورد</li>
+                    <li>قفل ضد التعديل</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* حوار فك القفل */}
+      {showUnlockDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" dir="rtl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4">
+            <div className="flex items-center gap-3 text-amber-600">
+              <Unlock size={24} />
+              <h3 className="font-bold text-lg">فك قفل الفاتورة</h3>
+            </div>
+            <p className="text-gray-600 text-sm">يتطلب كلمة مرور الإدارة لفك القفل والسماح بالتعديل.</p>
+            <input type="password" placeholder="كلمة مرور الإدارة"
+              value={adminPassword} onChange={e => setAdminPassword(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2"
+              onKeyDown={e => e.key === 'Enter' && handleUnlock()} />
+            <div className="flex gap-3">
+              <button onClick={handleUnlock} disabled={loading}
+                className="flex-1 bg-amber-600 text-white rounded-lg py-2 hover:bg-amber-700 font-medium">
+                {loading ? 'جاري...' : 'تأكيد'}
+              </button>
+              <button onClick={() => { setShowUnlockDialog(false); setAdminPassword('') }}
+                className="flex-1 border rounded-lg py-2 hover:bg-gray-50">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* حوار الحذف */}
+      {showDeleteDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" dir="rtl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <Trash2 size={24} />
+              <h3 className="font-bold text-lg">حذف الفاتورة</h3>
+            </div>
+            {isLocked && (
+              <div className="p-3 bg-red-50 rounded-lg text-sm text-red-600 flex items-start gap-2">
+                <AlertCircle size={16} className="mt-0.5" />
+                فاتورة مقفلة — سيتم عكس جميع آثارها من المخزون والخزينة وحساب المورد.
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium mb-1">سبب الحذف</label>
+              <input value={deleteReason} onChange={e => setDeleteReason(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="اختياري" />
+            </div>
+            {isLocked && (
+              <div>
+                <label className="block text-sm font-medium mb-1">كلمة مرور الإدارة <span className="text-red-500">*</span></label>
+                <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2" />
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button onClick={handleDelete} disabled={loading}
+                className="flex-1 bg-red-600 text-white rounded-lg py-2 hover:bg-red-700 font-medium flex items-center justify-center gap-2">
+                {loading && <Loader2 size={14} className="animate-spin" />}
+                تأكيد الحذف
+              </button>
+              <button onClick={() => { setShowDeleteDialog(false); setAdminPassword(''); setDeleteReason('') }}
+                className="flex-1 border rounded-lg py-2 hover:bg-gray-50">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

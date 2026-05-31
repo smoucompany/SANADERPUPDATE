@@ -18,17 +18,6 @@ interface AlertItem {
   level: 'critical' | 'low' | 'warning'
 }
 
-const MOCK_ALERTS: AlertItem[] = [
-  { id: '1', name: 'شاشة Samsung 27"',           sku: 'MON-SAM-27',  category: 'شاشات',       current_stock: 0,  min_stock: 5,  reorder_qty: 10, unit: 'قطعة', cost: 850,  supplier: 'مؤسسة التقنية', level: 'critical' },
-  { id: '2', name: 'كابل HDMI 2.0',              sku: 'CBL-HDMI-20', category: 'كابلات',       current_stock: 2,  min_stock: 20, reorder_qty: 50, unit: 'قطعة', cost: 15,   supplier: 'شركة الكابلات',  level: 'critical' },
-  { id: '3', name: 'ذاكرة RAM 16GB DDR5',        sku: 'RAM-16-DDR5',  category: 'ذاكرة',        current_stock: 3,  min_stock: 10, reorder_qty: 20, unit: 'قطعة', cost: 380,  supplier: 'مؤسسة التقنية', level: 'critical' },
-  { id: '4', name: 'قرص SSD 1TB NVMe',           sku: 'SSD-1T-NVM',  category: 'تخزين',        current_stock: 4,  min_stock: 8,  reorder_qty: 15, unit: 'قطعة', cost: 420,  supplier: 'شركة النجم',     level: 'low' },
-  { id: '5', name: 'لوحة مفاتيح ميكانيكية',       sku: 'KBD-MEC-01',  category: 'ملحقات',       current_stock: 6,  min_stock: 10, reorder_qty: 20, unit: 'قطعة', cost: 280,  supplier: 'شركة الخليج',    level: 'low' },
-  { id: '6', name: 'ماوس لاسلكي Logitech',        sku: 'MOU-LOG-WL',  category: 'ملحقات',       current_stock: 8,  min_stock: 15, reorder_qty: 25, unit: 'قطعة', cost: 120,  supplier: 'شركة الخليج',    level: 'low' },
-  { id: '7', name: 'طابعة HP LaserJet',           sku: 'PRT-HP-LJ',   category: 'طابعات',       current_stock: 2,  min_stock: 3,  reorder_qty: 5,  unit: 'قطعة', cost: 1200, supplier: 'مؤسسة HP',       level: 'warning' },
-  { id: '8', name: 'حبر طابعة أسود',              sku: 'INK-BLK-001', category: 'مستلزمات',     current_stock: 5,  min_stock: 10, reorder_qty: 30, unit: 'علبة', cost: 65,   supplier: 'مؤسسة HP',       level: 'warning' },
-  { id: '9', name: 'ورق A4 500 ورقة',             sku: 'PAP-A4-500',  category: 'قرطاسية',      current_stock: 3,  min_stock: 5,  reorder_qty: 20, unit: 'رزمة', cost: 25,   supplier: 'شركة الورق',     level: 'warning' },
-]
 
 const LEVEL_CONFIG = {
   critical: { label: 'حرج',    color: 'text-red-600 bg-red-100 dark:bg-red-900/30',       bar: 'bg-red-500',     dot: 'bg-red-500' },
@@ -41,7 +30,9 @@ export default function LowStockAlertsPage() {
   const [levelFilter, setLevelFilter] = useState<'all' | 'critical' | 'low' | 'warning'>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const filtered = MOCK_ALERTS.filter(a => {
+  const [alerts] = useState<AlertItem[]>([])
+
+  const filtered = alerts.filter(a => {
     const matchSearch = a.name.includes(search) || a.sku.includes(search) || a.category.includes(search)
     const matchLevel  = levelFilter === 'all' || a.level === levelFilter
     return matchSearch && matchLevel
@@ -55,16 +46,16 @@ export default function LowStockAlertsPage() {
     setSelected(new Set())
   }
 
-  const critical = MOCK_ALERTS.filter(a => a.level === 'critical').length
-  const low      = MOCK_ALERTS.filter(a => a.level === 'low').length
-  const warning  = MOCK_ALERTS.filter(a => a.level === 'warning').length
-  const reorderValue = MOCK_ALERTS.reduce((s, a) => s + a.cost * a.reorder_qty, 0)
+  const critical = alerts.filter(a => a.level === 'critical').length
+  const low      = alerts.filter(a => a.level === 'low').length
+  const warning  = alerts.filter(a => a.level === 'warning').length
+  const reorderValue = alerts.reduce((s, a) => s + a.cost * a.reorder_qty, 0)
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="تنبيهات المخزون المنخفض"
-        subtitle={`${MOCK_ALERTS.length} منتج يحتاج إعادة طلب`}
+        subtitle={`${alerts.length} منتج يحتاج إعادة طلب`}
         actions={
           <div className="flex gap-2">
             <button onClick={() => toast.success('جاري تحديث بيانات المخزون...')} className="btn-outline gap-1.5">

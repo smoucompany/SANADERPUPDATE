@@ -15,17 +15,6 @@ const TYPE_CONFIG = {
   info:    { icon: Info,          bg: 'bg-blue-100 dark:bg-blue-900/30',    color: 'text-blue-600',   label: 'معلومات' },
 }
 
-const MOCK_NOTIFICATIONS: Notification[] = [
-  { id: '1', title: 'طلب شراء جديد',              message: 'تم إنشاء طلب شراء PO-2026-006 بقيمة 12,400 ر.س', type: 'info',    is_read: false, created_at: new Date(Date.now() - 5*60000).toISOString(),   user_id: undefined, company_id: '', data: {} },
-  { id: '2', title: 'مخزون منخفض',                message: 'منتج "شاشة Samsung 27" وصل إلى الحد الأدنى (5 قطع)',type: 'warning', is_read: false, created_at: new Date(Date.now() - 30*60000).toISOString(),  user_id: undefined, company_id: '', data: {} },
-  { id: '3', title: 'فاتورة مستحقة',               message: 'الفاتورة INV-2026-041 من شركة الخليج مستحقة الدفع', type: 'error',   is_read: false, created_at: new Date(Date.now() - 2*3600000).toISOString(),  user_id: undefined, company_id: '', data: {} },
-  { id: '4', title: 'موافقة مرتجع',                message: 'تم الموافقة على مرتجع البيع RET-2026-003',           type: 'success', is_read: true,  created_at: new Date(Date.now() - 5*3600000).toISOString(),  user_id: undefined, company_id: '', data: {} },
-  { id: '5', title: 'دفعة راتب',                   message: 'تمت معالجة مسير رواتب شهر مايو 2026 بنجاح',          type: 'success', is_read: true,  created_at: new Date(Date.now() - 1*86400000).toISOString(), user_id: undefined, company_id: '', data: {} },
-  { id: '6', title: 'تقرير ضريبي',                 message: 'موعد تقديم الإقرار الضريبي لشهر مايو خلال 5 أيام',   type: 'warning', is_read: true,  created_at: new Date(Date.now() - 2*86400000).toISOString(), user_id: undefined, company_id: '', data: {} },
-  { id: '7', title: 'طلب إجازة',                   message: 'تم تقديم طلب إجازة من الموظف محمد السالم',           type: 'info',    is_read: true,  created_at: new Date(Date.now() - 3*86400000).toISOString(), user_id: undefined, company_id: '', data: {} },
-  { id: '8', title: 'تسجيل دخول جديد',             message: 'تسجيل دخول من جهاز جديد — الرياض، المملكة العربية',  type: 'warning', is_read: true,  created_at: new Date(Date.now() - 4*86400000).toISOString(), user_id: undefined, company_id: '', data: {} },
-  { id: '9', title: 'إغلاق فترة محاسبية',          message: 'تم إغلاق الفترة المحاسبية لشهر أبريل 2026',          type: 'success', is_read: true,  created_at: new Date(Date.now() - 5*86400000).toISOString(), user_id: undefined, company_id: '', data: {} },
-]
 
 export default function NotificationsPage() {
   const { user } = useAuthStore()
@@ -49,7 +38,7 @@ export default function NotificationsPage() {
     enabled: !!user,
   })
 
-  const notifications: Notification[] = (serverNotifs && serverNotifs.length > 0) ? serverNotifs : MOCK_NOTIFICATIONS
+  const notifications: Notification[] = serverNotifs || []
 
   const markRead = useMutation({
     mutationFn: async (id: string) => {

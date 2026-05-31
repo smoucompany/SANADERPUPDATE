@@ -24,11 +24,6 @@ type BankAccount = {
 const BANKS = ['البنك الأهلي السعودي','بنك الراجحي','بنك الرياض','البنك السعودي للاستثمار','بنك البلاد','البنك العربي الوطني','بنك سامبا','بنك الجزيرة']
 const CURRENCIES = ['SAR','USD','AED','EUR','GBP']
 
-const MOCK: BankAccount[] = [
-  { id:'1', account_name:'الحساب الرئيسي', bank_name:'البنك الأهلي السعودي', account_number:'SA1234567890', iban:'SA29 6000 0001 0668 0900 00', currency:'SAR', balance:125000, is_default:true, is_active:true },
-  { id:'2', account_name:'حساب العمليات', bank_name:'بنك الراجحي', account_number:'SA0987654321', iban:'SA36 8000 0000 6080 1016 7519', currency:'SAR', balance:43500, is_default:false, is_active:true },
-  { id:'3', account_name:'حساب الرواتب', bank_name:'بنك الرياض', account_number:'SA1122334455', iban:'SA44 2000 0000 0000 0000 00', currency:'SAR', balance:18750, is_default:false, is_active:true },
-]
 
 export default function BankAccountsPage() {
   const { user } = useAuthStore()
@@ -38,24 +33,62 @@ export default function BankAccountsPage() {
   const [form, setForm] = useState({ account_name:'', bank_name:'', account_number:'', iban:'', currency:'SAR', opening_balance:'0' })
   const set = (k: string, v: string) => setForm(p => ({...p,[k]:v}))
 
-  const totalBalance = MOCK.reduce((s,a) => s + a.balance, 0)
-  const activeAccounts = MOCK.filter(a => a.is_active).length
+  const { data: bankAccounts = [] } = useQuery<BankAccount[]>({
+    queryKey: ['bank_accounts', user?.company_id],
+    queryFn: async () => {
+      if (!user) return []
+      const { data } = await supabase.from('bank_accounts').select('*').eq('company_id', user.company_id).order('account_name')
+      return (data as BankAccount[]) || []
+    },
+    enabled: !!user,
+  })
+
+  const totalBalance = bankAccounts.reduce((s,a) => s + a.balance, 0)
+  const activeAccounts = bankAccounts.filter(a => a.is_active).length
+
+  const qc = useQueryClient()
 
   const handleSave = async () => {
     if (!form.account_name || !form.bank_name || !form.account_number) { toast.error('أدخل بيانات الحساب'); return }
     setSaving(true)
-    await new Promise(r => setTimeout(r, 700))
-    setSaving(false)
-    toast.success('تم إضافة الحساب البنكي')
-    setShowForm(false)
-    setForm({ account_name:'', bank_name:'', account_number:'', iban:'', currency:'SAR', opening_balance:'0' })
+    try {
+      const { error } = await supabase.from('bank_accounts').insert({
+        company_id:      user!.company_id,
+        account_name:    form.account_name,
+        bank_name:       form.bank_name,
+        account_number:  form.account_number,
+        iban:            form.iban,
+        currency:        form.currency,
+        balance:         parseFloat(form.opening_balance) || 0,
+        is_default:      false,
+        is_active:       true,
+      })
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['bank_accounts'] })
+      toast.success('تم إضافة الحساب البنكي')
+      setShowForm(false)
+      setForm({ account_name:'', bank_name:'', account_number:'', iban:'', currency:'SAR', opening_balance:'0' })
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    const { error } = await supabase.from('bank_accounts').delete().eq('id', deleteId)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['bank_accounts'] })
+    toast.success('تم حذف الحساب')
+    setDeleteId(null)
   }
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="الحسابات البنكية"
-        subtitle={`${MOCK.length} حساب`}
+        subtitle={`${bankAccounts.length} حساب`}
         actions={
           <button onClick={() => setShowForm(true)} className="btn-primary gap-1.5">
             <Plus className="w-4 h-4" />إضافة حساب
@@ -79,7 +112,7 @@ export default function BankAccountsPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">إجمالي الإيداعات (هذا الشهر)</p>
-            <p className="text-xl font-black text-emerald-600">{formatCurrency(87400)}</p>
+            <p className="text-xl font-black text-emerald-600">—</p>
           </div>
         </div>
         <div className="bg-card border border-border/60 rounded-2xl p-5 flex items-center gap-3">
@@ -88,14 +121,14 @@ export default function BankAccountsPage() {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">إجمالي السحوبات (هذا الشهر)</p>
-            <p className="text-xl font-black text-red-500">{formatCurrency(52100)}</p>
+            <p className="text-xl font-black text-red-500">—</p>
           </div>
         </div>
       </div>
 
       {/* Accounts Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {MOCK.map(account => (
+        {bankAccounts.map(account => (
           <div key={account.id} className={`bg-card border rounded-2xl p-5 hover:shadow-md transition-all ${account.is_default ? 'border-primary/40 ring-1 ring-primary/20' : 'border-border/60'}`}>
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-2.5">
@@ -188,7 +221,7 @@ export default function BankAccountsPage() {
         </div>
       </Modal>
 
-      <ConfirmDialog open={!!deleteId} onCancel={() => setDeleteId(null)} onConfirm={() => { toast.success('تم حذف الحساب'); setDeleteId(null) }}
+      <ConfirmDialog open={!!deleteId} onCancel={() => setDeleteId(null)} onConfirm={handleDelete}
         title="حذف الحساب البنكي" message="هل أنت متأكد؟ سيتم حذف الحساب وجميع بياناته." />
     </div>
   )

@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Building2, Car, Monitor, Package, Edit2, Trash2, Loader2, Save, TrendingDown } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -22,13 +25,6 @@ type Asset = {
 
 const CATEGORIES = ['عقارات ومباني','سيارات ومركبات','أجهزة وحواسيب','معدات وآلات','أثاث ومفروشات','أخرى']
 
-const MOCK: Asset[] = [
-  { id:'1', name:'مقر الشركة الرئيسي', category:'عقارات ومباني', purchase_date:'2020-01-15', purchase_cost:2000000, useful_life:40, depreciation_method:'القسط الثابت', book_value:1875000, accumulated_depreciation:125000, status:'active' },
-  { id:'2', name:'سيارة تويوتا كامري 2023', category:'سيارات ومركبات', purchase_date:'2023-03-10', purchase_cost:95000, useful_life:5, depreciation_method:'القسط الثابت', book_value:57000, accumulated_depreciation:38000, status:'active' },
-  { id:'3', name:'خادم IBM ProLiant', category:'أجهزة وحواسيب', purchase_date:'2022-06-01', purchase_cost:45000, useful_life:5, depreciation_method:'القسط الثابت', book_value:27000, accumulated_depreciation:18000, status:'active' },
-  { id:'4', name:'خط إنتاج #1', category:'معدات وآلات', purchase_date:'2019-08-20', purchase_cost:350000, useful_life:15, depreciation_method:'القسط الثابت', book_value:245000, accumulated_depreciation:105000, status:'active' },
-  { id:'5', name:'أثاث المكتب الرئيسي', category:'أثاث ومفروشات', purchase_date:'2021-01-01', purchase_cost:30000, useful_life:10, depreciation_method:'القسط الثابت', book_value:21000, accumulated_depreciation:9000, status:'active' },
-]
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
   'عقارات ومباني': Building2,
@@ -38,25 +34,67 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
 }
 
 export default function AssetsPage() {
+  const { user } = useAuthStore()
+  const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [deleteId, setDeleteId] = useState<string|null>(null)
   const [saving, setSaving] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('')
   const [form, setForm] = useState({ name:'', category:'', purchase_date:'', purchase_cost:'', useful_life:'5', depreciation_method:'القسط الثابت' })
 
-  const filtered = MOCK.filter(a => !categoryFilter || a.category === categoryFilter)
-  const totalCost = MOCK.reduce((s,a) => s + a.purchase_cost, 0)
-  const totalBook = MOCK.reduce((s,a) => s + a.book_value, 0)
-  const totalDepreciation = MOCK.reduce((s,a) => s + a.accumulated_depreciation, 0)
+  const { data: assets = [], isLoading } = useQuery<Asset[]>({
+    queryKey: ['assets', user?.company_id],
+    queryFn: async () => {
+      if (!user) return []
+      const { data } = await supabase.from('assets').select('*').eq('company_id', user.company_id).eq('status', 'active').order('name')
+      return (data as Asset[]) || []
+    },
+    enabled: !!user,
+  })
+
+  const filtered = assets.filter(a => !categoryFilter || a.category === categoryFilter)
+  const totalCost = assets.reduce((s,a) => s + a.purchase_cost, 0)
+  const totalBook = assets.reduce((s,a) => s + a.book_value, 0)
+  const totalDepreciation = assets.reduce((s,a) => s + a.accumulated_depreciation, 0)
 
   const handleSave = async () => {
     if (!form.name || !form.category || !form.purchase_date || !form.purchase_cost) { toast.error('أدخل جميع البيانات المطلوبة'); return }
     setSaving(true)
-    await new Promise(r => setTimeout(r, 700))
-    setSaving(false)
-    toast.success('تم إضافة الأصل الثابت')
-    setShowForm(false)
-    setForm({ name:'', category:'', purchase_date:'', purchase_cost:'', useful_life:'5', depreciation_method:'القسط الثابت' })
+    try {
+      const cost = parseFloat(form.purchase_cost) || 0
+      const life = parseInt(form.useful_life) || 5
+      const annualDep = cost / life
+      const { error } = await supabase.from('assets').insert({
+        company_id:               user!.company_id,
+        name:                     form.name,
+        category:                 form.category,
+        purchase_date:            form.purchase_date,
+        purchase_cost:            cost,
+        useful_life:              life,
+        depreciation_method:      form.depreciation_method,
+        book_value:               cost,
+        accumulated_depreciation: 0,
+        status:                   'active',
+      })
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['assets'] })
+      toast.success('تم إضافة الأصل الثابت')
+      setShowForm(false)
+      setForm({ name:'', category:'', purchase_date:'', purchase_cost:'', useful_life:'5', depreciation_method:'القسط الثابت' })
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    const { error } = await supabase.from('assets').update({ status: 'disposed' }).eq('id', deleteId)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['assets'] })
+    toast.success('تم حذف الأصل')
+    setDeleteId(null)
   }
 
   const columns: Column<Asset>[] = [
@@ -112,7 +150,7 @@ export default function AssetsPage() {
     <div className="space-y-5">
       <PageHeader
         title="الأصول الثابتة"
-        subtitle={`${MOCK.length} أصل ثابت`}
+        subtitle={`${assets.length} أصل ثابت`}
         actions={
           <button onClick={() => setShowForm(true)} className="btn-primary gap-1.5">
             <Plus className="w-4 h-4" />إضافة أصل
@@ -193,7 +231,7 @@ export default function AssetsPage() {
         </div>
       </Modal>
 
-      <ConfirmDialog open={!!deleteId} onCancel={() => setDeleteId(null)} onConfirm={() => { toast.success('تم حذف الأصل'); setDeleteId(null) }}
+      <ConfirmDialog open={!!deleteId} onCancel={() => setDeleteId(null)} onConfirm={handleDelete}
         title="حذف الأصل الثابت" message="هل أنت متأكد؟ سيتم حذف الأصل وجميع بياناته." />
     </div>
   )

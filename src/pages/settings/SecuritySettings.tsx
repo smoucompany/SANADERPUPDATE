@@ -1,9 +1,233 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { Key, Shield, Database, HardDrive, Smartphone, Save, Download, Upload, Eye, EyeOff, FileSearch, RefreshCw } from 'lucide-react'
+﻿import { useState, useEffect } from 'react'
+import { useParams, Navigate } from 'react-router-dom'
+import { Key, Shield, Database, HardDrive, Smartphone, Save, Download, Upload, Eye, EyeOff, FileSearch, RefreshCw, CheckCircle2, AlertTriangle, ArrowUpCircle, ExternalLink, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { SectionCard, SettingRow, Toggle } from './shared'
+import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
+
+/* ═══════════════════════════════════════════════════
+   UPDATE TAB — standalone component
+═══════════════════════════════════════════════════ */
+function UpdateTab({ remoteUpdateUrl, currentVersion }: { remoteUpdateUrl: string; currentVersion: string }) {
+  const [checking, setChecking] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [swStatus, setSwStatus] = useState<'idle' | 'up_to_date' | 'available' | 'error'>('idle')
+  const [remote, setRemote] = useState<{
+    version: string; notes: string; released_at: string; url: string; filename: string; features?: string[]
+  } | null>(null)
+  const [remoteStatus, setRemoteStatus] = useState<'idle' | 'loading' | 'up_to_date' | 'available' | 'error' | 'no_url'>('idle')
+
+  /* Auto-check remote on mount */
+  useEffect(() => {
+    if (remoteUpdateUrl) checkRemote()
+    else setRemoteStatus('no_url')
+  }, [remoteUpdateUrl])
+
+  /* ── Check remote manifest ── */
+  const checkRemote = async () => {
+    setRemoteStatus('loading')
+    setRemote(null)
+    try {
+      const res = await fetch(remoteUpdateUrl, { cache: 'no-store' })
+
+      // 404 = no version published yet — not a real error
+      if (res.status === 404) {
+        setRemoteStatus('up_to_date')
+        return
+      }
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+      const data = await res.json()
+
+      // The API might return { error: '...' } when no version exists
+      if (data?.error && !data?.version) {
+        setRemoteStatus('up_to_date')
+        return
+      }
+
+      setRemote(data)
+      setRemoteStatus(data.version && data.version !== currentVersion ? 'available' : 'up_to_date')
+    } catch (e: any) {
+      setRemoteStatus('error')
+      // Don't show a toast for network errors — just show status in UI
+    }
+  }
+
+  /* ── Check Service Worker (PWA local update) ── */
+  const checkSW = async () => {
+    setChecking(true)
+    setSwStatus('idle')
+    try {
+      if (!('serviceWorker' in navigator)) { setSwStatus('error'); return }
+      const reg = await navigator.serviceWorker.getRegistration()
+      if (!reg) { setSwStatus('up_to_date'); return }
+      await reg.update()
+      if (reg.waiting || reg.installing) { setSwStatus('available') }
+      else { setSwStatus('up_to_date') }
+    } catch { setSwStatus('error') }
+    finally { setChecking(false) }
+  }
+
+  /* ── Apply update — clear SW cache then hard reload ── */
+  const applySW = async () => {
+    setApplying(true)
+    try {
+      // 1. Tell waiting SW to activate (if any)
+      const reg = await navigator.serviceWorker.getRegistration()
+      if (reg?.waiting) {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+      }
+
+      // 2. Clear all caches so browser fetches fresh files
+      if ('caches' in window) {
+        const keys = await caches.keys()
+        await Promise.all(keys.map(k => caches.delete(k)))
+      }
+
+      // 3. Unregister SW to force full re-download on next load
+      const allRegs = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(allRegs.map(r => r.unregister()))
+
+      // 4. Hard navigate (not just reload) to bypass any remaining cache
+      setTimeout(() => {
+        window.location.href = window.location.origin + '/?updated=' + Date.now()
+      }, 800)
+    } catch { toast.error('فشل تطبيق التحديث') }
+    finally { setApplying(false) }
+  }
+
+  const hasNewRemote = remoteStatus === 'available' && remote
+
+  return (
+    <div className="space-y-4">
+
+      {/* ── Remote update card ── */}
+      <div className={`rounded-2xl border-2 overflow-hidden transition-colors ${
+        hasNewRemote
+          ? 'border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/10'
+          : remoteStatus === 'up_to_date'
+          ? 'border-emerald-400 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/10'
+          : 'border-border/60 bg-card'
+      }`}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border/40">
+          <div className="flex items-center gap-3">
+            {remoteStatus === 'loading' && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
+            {remoteStatus === 'available' && <ArrowUpCircle className="w-5 h-5 text-amber-500" />}
+            {remoteStatus === 'up_to_date' && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+            {remoteStatus === 'error' && <AlertTriangle className="w-5 h-5 text-red-500" />}
+            {(remoteStatus === 'idle' || remoteStatus === 'no_url') && <RefreshCw className="w-5 h-5 text-muted-foreground" />}
+            <div>
+              <p className="font-bold text-sm">
+                {remoteStatus === 'available' ? `🆕 يتوفر إصدار جديد — ${remote?.version}` :
+                 remoteStatus === 'up_to_date' ? '✅ التطبيق محدث بآخر إصدار' :
+                 remoteStatus === 'loading' ? 'جاري التحقق من التحديثات...' :
+                 remoteStatus === 'error' ? '⚠️ تعذّر الاتصال — تحقق من الإنترنت أو حاول لاحقاً' :
+                 remoteStatus === 'no_url' ? 'لم يتم تكوين سيرفر التحديثات' :
+                 'تحديثات النظام'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                الإصدار الحالي: <span className="font-mono font-bold">{currentVersion}</span>
+                {remote?.version && remoteStatus === 'available' &&
+                  <> &nbsp;←&nbsp; الإصدار الجديد: <span className="font-mono font-bold text-amber-600">{remote.version}</span></>
+                }
+              </p>
+            </div>
+          </div>
+          <button onClick={checkRemote} disabled={remoteStatus === 'loading'} className="btn-outline text-xs gap-1.5 h-8 px-3">
+            <RefreshCw className={`w-3.5 h-3.5 ${remoteStatus === 'loading' ? 'animate-spin' : ''}`} />
+            فحص الآن
+          </button>
+        </div>
+
+        {/* Details when update available */}
+        {hasNewRemote && (
+          <div className="px-5 py-4 space-y-4">
+            {remote.notes && (
+              <div className="bg-white/60 dark:bg-black/20 rounded-xl p-4 text-sm">
+                <p className="font-semibold mb-1 text-amber-700 dark:text-amber-400">ملاحظات الإصدار</p>
+                <p className="text-muted-foreground leading-relaxed">{remote.notes}</p>
+              </div>
+            )}
+
+            {remote.features && remote.features.length > 0 && (
+              <div>
+                <p className="font-semibold text-xs text-muted-foreground mb-2 uppercase tracking-wider">ما الجديد</p>
+                <ul className="space-y-1.5">
+                  {remote.features.map((f, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm">
+                      <span className="w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">✓</span>
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {remote.released_at && (
+              <p className="text-xs text-muted-foreground">
+                📅 تاريخ الإصدار: {formatDate(remote.released_at.split('T')[0])}
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              {remote.url && (
+                <a href={remote.url} target="_blank" rel="noopener noreferrer"
+                  className="btn-outline gap-2 text-sm flex-1 justify-center">
+                  <ExternalLink className="w-4 h-4" />تحميل التحديث ({remote.filename || 'ملف التحديث'})
+                </a>
+              )}
+              <button onClick={applySW} disabled={applying} className="btn-primary gap-2 text-sm">
+                <RefreshCw className={`w-4 h-4 ${applying ? 'animate-spin' : ''}`} />
+                {applying ? 'جاري التطبيق...' : 'تطبيق وإعادة تحميل'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── PWA / Service Worker section ── */}
+      <SectionCard title="تحديث ذاكرة التطبيق المحلية (PWA)" icon={HardDrive} iconColor="apple-blue">
+        <div className="py-3 space-y-3">
+          <p className="text-sm text-muted-foreground">
+            يقوم هذا الزر بإجبار المتصفح على تحميل أحدث نسخة من ملفات التطبيق وتحديث الـ Service Worker.
+          </p>
+          <div className="flex gap-3">
+            <button onClick={checkSW} disabled={checking} className="btn-outline gap-2 flex-1">
+              <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
+              {checking ? 'جاري التحقق...' : 'تحقق من التحديث المحلي'}
+            </button>
+            <button onClick={applySW} disabled={swStatus !== 'available' || applying} className="btn-primary gap-2 flex-1">
+              <Save className="w-4 h-4" />
+              {applying ? 'جاري التطبيق...' : 'تطبيق التحديث'}
+            </button>
+          </div>
+          <div className={`rounded-xl border px-4 py-3 text-sm flex items-center gap-2 ${
+            swStatus === 'available' ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400' :
+            swStatus === 'up_to_date' ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/10 text-emerald-700 dark:text-emerald-400' :
+            swStatus === 'error' ? 'border-red-400 bg-red-50 dark:bg-red-900/10 text-red-600' :
+            'border-border/40 bg-muted/40 text-muted-foreground'
+          }`}>
+            {swStatus === 'available' && <ArrowUpCircle className="w-4 h-4 shrink-0" />}
+            {swStatus === 'up_to_date' && <CheckCircle2 className="w-4 h-4 shrink-0" />}
+            {swStatus === 'error' && <AlertTriangle className="w-4 h-4 shrink-0" />}
+            {swStatus === 'idle' && <RefreshCw className="w-4 h-4 shrink-0 opacity-40" />}
+            <span>
+              {swStatus === 'available' ? 'يوجد تحديث جاهز للتطبيق — اضغط "تطبيق التحديث"' :
+               swStatus === 'up_to_date' ? 'ملفات التطبيق المحلية محدثة بالكامل' :
+               swStatus === 'error' ? 'المتصفح لا يدعم Service Worker' :
+               'اضغط "تحقق من التحديث المحلي" للفحص'}
+            </span>
+          </div>
+        </div>
+      </SectionCard>
+
+    </div>
+  )
+}
 
 export default function SecuritySettings() {
   const { sub } = useParams<{ sub: string }>()
@@ -13,117 +237,11 @@ export default function SecuritySettings() {
   const [confirmPw, setConfirmPw] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [checking, setChecking] = useState(false)
-  const [applying, setApplying] = useState(false)
-  const [updateAvailable, setUpdateAvailable] = useState(false)
-  const [updateStatus, setUpdateStatus] = useState('لم يتم فحص التحديث بعد')
   const remoteUpdateUrl = (import.meta as any).env.VITE_UPDATE_MANIFEST_URL as string
   const currentVersion = (import.meta as any).env.VITE_APP_VERSION as string || '1.0.0'
-  const [externalChecking, setExternalChecking] = useState(false)
-  const [externalStatus, setExternalStatus] = useState('لم يتم فحص التحديث الخارجي بعد')
-  const [remoteMetadata, setRemoteMetadata] = useState<{ version?: string; url?: string; notes?: string } | null>(null)
 
-  const handleCheckForUpdate = async () => {
-    if (!('serviceWorker' in navigator)) {
-      toast.error('المتصفح لا يدعم تحديث النظام التلقائي')
-      setUpdateStatus('المتصفح لا يدعم Service Worker')
-      return
-    }
 
-    setChecking(true)
-    setUpdateAvailable(false)
-    setUpdateStatus('جاري التحقق من وجود تحديث...')
-
-    try {
-      const registration = await navigator.serviceWorker.getRegistration()
-      if (!registration) {
-        setUpdateStatus('لم يتم العثور على Service Worker. سيتم إعادة تحميل الصفحة.')
-        toast('لا يوجد Service Worker مثبت.')
-        return
-      }
-
-      await registration.update()
-      if (registration.waiting) {
-        setUpdateAvailable(true)
-        setUpdateStatus('يتوفر تحديث جديد الآن. اضغط تطبيق التحديث.')
-        toast.success('يتوفر تحديث جديد')
-        return
-      }
-
-      if (registration.installing) {
-        setUpdateStatus('يتم تنزيل التحديث الآن. انتظر قليلاً ثم اضغط تطبيق التحديث إذا أصبح متاحاً.')
-        registration.installing.addEventListener('statechange', () => {
-          if (registration.installing?.state === 'installed') {
-            setUpdateAvailable(true)
-            setUpdateStatus('تم تنزيل التحديث. اضغط تطبيق التحديث الآن.')
-            toast.success('تم تنزيل التحديث')
-          }
-        })
-        return
-      }
-
-      setUpdateStatus('التطبيق محدث حالياً. لا يوجد تحديث جديد.')
-      toast.success('التطبيق محدث')
-    } catch (e: any) {
-      setUpdateStatus('حدث خطأ أثناء التحقق من التحديث')
-      toast.error(e?.message || 'فشل التحقق من التحديث')
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  const handleApplyUpdate = async () => {
-    setApplying(true)
-    try {
-      const registration = await navigator.serviceWorker.getRegistration()
-      if (registration?.waiting) {
-        registration.waiting.postMessage({ type: 'SKIP_WAITING' })
-      }
-      setUpdateStatus('جارٍ تطبيق التحديث. ستُعاد تحميل الصفحة.')
-      setTimeout(() => window.location.reload(), 1200)
-    } catch (e: any) {
-      toast.error('فشل تطبيق التحديث')
-    } finally {
-      setApplying(false)
-    }
-  }
-
-  const handleCheckExternalUpdate = async () => {
-    if (!remoteUpdateUrl) {
-      toast.error('لم يتم تكوين عنوان التحديث الخارجي')
-      setExternalStatus('لم يتم تكوين عنوان تحديث خارجي')
-      return
-    }
-
-    setExternalChecking(true)
-    setExternalStatus('جاري التحقق من التحديث الخارجي...')
-    setRemoteMetadata(null)
-
-    try {
-      const response = await fetch(remoteUpdateUrl, { cache: 'no-store' })
-      if (!response.ok) {
-        throw new Error('لم يتم العثور على ملف التحديث الخارجي')
-      }
-      const data = await response.json()
-      setRemoteMetadata(data)
-
-      if (data.version && data.version !== currentVersion) {
-        setUpdateAvailable(true)
-        setExternalStatus(`يتوفر تحديث خارجي ${data.version}. افتح الرابط لتثبيت.`)
-        toast.success('يتوفر تحديث خارجي جديد')
-      } else {
-        setExternalStatus(`التطبيق محدث. الإصدار الحالي ${currentVersion}`)
-        setUpdateAvailable(false)
-      }
-    } catch (e: any) {
-      setExternalStatus('فشل فحص التحديث الخارجي')
-      toast.error(e?.message || 'حدث خطأ أثناء فحص التحديث الخارجي')
-    } finally {
-      setExternalChecking(false)
-    }
-  }
-
-  const handleChangePassword = async () => {
+const handleChangePassword = async () => {
     if (!currentPw || !newPw || !confirmPw) { toast.error('جميع حقول كلمة المرور مطلوبة'); return }
     if (newPw !== confirmPw) { toast.error('كلمة المرور الجديدة غير متطابقة'); return }
     if (newPw.length < 8) { toast.error('كلمة المرور يجب أن تكون 8 أحرف على الأقل'); return }
@@ -223,54 +341,10 @@ export default function SecuritySettings() {
   )
 
   if (sub === 'update') return (
-    <div className="space-y-4">
-      <SectionCard title="تحديث النظام" icon={RefreshCw} iconColor="apple-orange">
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            اضغط التحقق لمعرفة ما إذا كان هناك إصدار جديد، ثم اضغط تطبيق التحديث.
-            لن يتم حذف بيانات النظام أو بيانات العملاء عند التحديث.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button onClick={handleCheckForUpdate} disabled={checking} className="btn-outline gap-2">
-              <RefreshCw className="w-4 h-4" />{checking ? 'جاري التحقق...' : 'تحقق من التحديث'}
-            </button>
-            <button onClick={handleApplyUpdate} disabled={!updateAvailable || applying} className="btn-primary gap-2">
-              <Save className="w-4 h-4" />{applying ? 'جاري التطبيق...' : 'تطبيق التحديث'}
-            </button>
-          </div>
-          {remoteUpdateUrl && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button onClick={handleCheckExternalUpdate} disabled={externalChecking} className="btn-outline gap-2">
-                <RefreshCw className="w-4 h-4" />{externalChecking ? 'جاري التحقق الخارجي...' : 'تحقق من التحديث الخارجي'}
-              </button>
-              <button
-                onClick={() => remoteMetadata?.url && window.open(remoteMetadata.url, '_blank')}
-                disabled={!remoteMetadata?.url}
-                className="btn-secondary gap-2"
-              >
-                <Download className="w-4 h-4" />فتح رابط التحديث
-              </button>
-            </div>
-          )}
-          <div className="rounded-2xl border border-border/60 bg-muted/50 p-4 text-sm space-y-3">
-            <div>
-              <p className="font-medium mb-2">حالة التحديث المحلي</p>
-              <p>{updateStatus}</p>
-            </div>
-            {remoteUpdateUrl && (
-              <div>
-                <p className="font-medium mb-2">حالة التحديث الخارجي</p>
-                <p>{externalStatus}</p>
-                {remoteMetadata?.notes && <p className="text-xs text-muted-foreground">ملاحظات: {remoteMetadata.notes}</p>}
-              </div>
-            )}
-          </div>
-          <p className="text-[12px] text-muted-foreground">
-            إذا لم يكن هناك Service Worker، سيتم إعادة تحميل الصفحة فقط للحصول على آخر نسخة من التطبيق.
-          </p>
-        </div>
-      </SectionCard>
-    </div>
+    <UpdateTab
+      remoteUpdateUrl={remoteUpdateUrl}
+      currentVersion={currentVersion}
+    />
   )
 
   if (sub === 'audit') return (
@@ -310,5 +384,5 @@ export default function SecuritySettings() {
     </div>
   )
 
-  return null
+  return <Navigate to="/settings/security/password" replace />
 }

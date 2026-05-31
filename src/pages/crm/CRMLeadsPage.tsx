@@ -1,8 +1,12 @@
 import { useState } from 'react'
-import { Plus, Phone, Mail, MessageSquare, ChevronLeft, Search, Filter, TrendingUp, Users, DollarSign, Target } from 'lucide-react'
+import { Plus, Phone, Mail, MessageSquare, Search, TrendingUp, Users, DollarSign, Target, Edit2, Trash2, Loader2, Save } from 'lucide-react'
+import { useLeads, useCreateLead, useUpdateLeadStage } from '@/hooks/useCRM'
+import { useQueryClient } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import toast from 'react-hot-toast'
 
 type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost'
@@ -34,51 +38,82 @@ const STAGES: { id: LeadStatus; label: string; color: string; bg: string }[] = [
 
 const SOURCES = ['موقع إلكتروني', 'إحالة', 'واتساب', 'معرض تجاري', 'إعلان', 'بريد إلكتروني', 'أخرى']
 
-const MOCK_LEADS: Lead[] = [
-  { id:'1', name:'خالد المنصور', company:'شركة المنصور للتجارة', phone:'0501234567', email:'k@mansour.com', source:'موقع إلكتروني', status:'new', value:85000, assigned_to:'أحمد العمري', created_at:'2026-05-28', last_contact:'2026-05-28', notes:'مهتم بنظام ERP كامل' },
-  { id:'2', name:'نورة السالم', company:'مؤسسة النور', phone:'0557654321', email:'n@noor.com', source:'إحالة', status:'contacted', value:42000, assigned_to:'سارة الأحمدي', created_at:'2026-05-25', last_contact:'2026-05-27', notes:'تحتاج عرض سعر للمحاسبة' },
-  { id:'3', name:'فهد العتيبي', company:'مجموعة العتيبي', phone:'0509876543', email:'f@otaibi.com', source:'واتساب', status:'qualified', value:120000, assigned_to:'أحمد العمري', created_at:'2026-05-20', last_contact:'2026-05-26', notes:'مشروع كبير للتحول الرقمي' },
-  { id:'4', name:'ريم الحربي', company:'شركة الحربي', phone:'0534567890', email:'r@harbi.com', source:'معرض تجاري', status:'proposal', value:65000, assigned_to:'سارة الأحمدي', created_at:'2026-05-15', last_contact:'2026-05-25', notes:'أرسلنا عرض سعر - بانتظار الرد' },
-  { id:'5', name:'عمر القحطاني', company:'مؤسسة القحطاني', phone:'0543210987', email:'o@qahtani.com', source:'إعلان', status:'negotiation', value:95000, assigned_to:'أحمد العمري', created_at:'2026-05-10', last_contact:'2026-05-28', notes:'يتفاوض على السعر' },
-  { id:'6', name:'شركة الأفق', company:'شركة الأفق للتقنية', phone:'0512345678', email:'info@ufuq.com', source:'إحالة', status:'won', value:185000, assigned_to:'أحمد العمري', created_at:'2026-04-01', last_contact:'2026-05-01', notes:'تم إغلاق الصفقة بنجاح' },
-  { id:'7', name:'مؤسسة الوطن', company:'مؤسسة الوطن للخدمات', phone:'0521234567', email:'info@watan.com', source:'بريد إلكتروني', status:'lost', value:35000, assigned_to:'سارة الأحمدي', created_at:'2026-04-15', last_contact:'2026-05-10', notes:'اختاروا منافساً آخر' },
-]
 
 const EMPTY_FORM = { name:'', company:'', phone:'', email:'', source:'', status:'new' as LeadStatus, value:'', assigned_to:'', notes:'' }
 
 export default function CRMLeadsPage() {
-  const [leads, setLeads] = useState<Lead[]>(MOCK_LEADS)
+  const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [editLead, setEditLead] = useState<Lead | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<LeadStatus | ''>('')
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban')
   const [form, setForm] = useState(EMPTY_FORM)
-  const [saving, setSaving] = useState(false)
 
-  const filtered = leads.filter(l =>
-    (!search || l.name.includes(search) || l.company.includes(search)) &&
-    (!filterStatus || l.status === filterStatus)
-  )
+  const { data: leadsResult, isLoading } = useLeads({ stage: filterStatus || undefined, search: search || undefined })
+  const leads: Lead[] = (leadsResult?.data ?? []).map((l: any) => ({
+    id: l.id, name: l.name, company: l.company || '', phone: l.phone || '',
+    email: l.email || '', source: l.source || '', status: l.stage as LeadStatus,
+    value: l.expected_value || 0, assigned_to: l.assigned_to || '',
+    created_at: l.created_at, last_contact: l.last_contact_date || l.created_at, notes: l.notes || '',
+  }))
+
+  const createLead = useCreateLead()
+  const updateStage = useUpdateLeadStage()
+
+  const filtered = leads
 
   const totalValue = leads.filter(l => l.status !== 'lost').reduce((s, l) => s + l.value, 0)
-  const wonValue = leads.filter(l => l.status === 'won').reduce((s, l) => s + l.value, 0)
-  const conversionRate = Math.round((leads.filter(l => l.status === 'won').length / leads.length) * 100)
+  const wonValue   = leads.filter(l => l.status === 'won').reduce((s, l) => s + l.value, 0)
+  const conversionRate = leads.length > 0 ? Math.round((leads.filter(l => l.status === 'won').length / leads.length) * 100) : 0
 
   const handleSubmit = async () => {
     if (!form.name || !form.company || !form.phone) { toast.error('الاسم والشركة والهاتف مطلوبة'); return }
-    setSaving(true)
-    await new Promise(r => setTimeout(r, 600))
-    const newLead: Lead = {
-      id: String(Date.now()), ...form,
-      value: Number(form.value) || 0,
-      created_at: new Date().toISOString().slice(0, 10),
-      last_contact: new Date().toISOString().slice(0, 10),
+    const payload = {
+      name: form.name, company: form.company, phone: form.phone, email: form.email,
+      source: form.source, stage: form.status, expected_value: Number(form.value) || 0,
+      assigned_to: form.assigned_to, notes: form.notes,
     }
-    setLeads(p => [newLead, ...p])
-    setSaving(false)
-    toast.success('تم إضافة العميل المحتمل')
+    if (editLead?.id) {
+      const { error } = await supabase.from('crm_leads').update(payload).eq('id', editLead.id)
+      if (error) { toast.error(error.message); return }
+      qc.invalidateQueries({ queryKey: ['leads'] })
+      toast.success('تم تعديل العميل المحتمل')
+    } else {
+      await createLead.mutateAsync(payload)
+    }
     setShowForm(false)
+    setEditLead(null)
     setForm(EMPTY_FORM)
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    const { error } = await supabase.from('crm_leads').delete().eq('id', deleteId)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['leads'] })
+    toast.success('تم حذف العميل المحتمل')
+    setDeleteId(null)
+  }
+
+  const openEdit = (lead: Lead) => {
+    setEditLead(lead)
+    setForm({ name: lead.name, company: lead.company, phone: lead.phone, email: lead.email,
+      source: lead.source, status: lead.status, value: String(lead.value),
+      assigned_to: lead.assigned_to, notes: lead.notes })
+    setShowForm(true)
+  }
+
+  const handleCall = (lead: Lead) => {
+    if (lead.phone) window.open(`tel:${lead.phone}`)
+    else toast.error('لا يوجد رقم هاتف')
+  }
+
+  const handleWhatsapp = (lead: Lead) => {
+    const num = lead.phone?.replace(/\D/g, '')
+    if (num) window.open(`https://wa.me/${num}`, '_blank')
+    else toast.error('لا يوجد رقم هاتف')
   }
 
   return (
@@ -104,6 +139,8 @@ export default function CRMLeadsPage() {
       />
 
       {/* Stats */}
+      {isLoading && <div className="flex justify-center py-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'إجمالي الفرص', value: leads.length, sub: 'عميل محتمل', bg: 'bg-blue-500', icon: Users },
@@ -171,12 +208,12 @@ export default function CRMLeadsPage() {
                       </div>
                       <p className="font-bold text-primary text-sm">{formatCurrency(lead.value)}</p>
                       <div className="flex gap-2">
-                        <button onClick={() => toast.success(`جاري الاتصال بـ ${lead.name}`)}
+                        <button onClick={() => handleCall(lead)}
                           className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors">
                           <Phone className="w-3 h-3" />اتصال
                         </button>
-                        <button onClick={() => toast.success(`جاري فتح واتساب...`)}
-                          className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors">
+                        <button onClick={() => handleWhatsapp(lead)}
+                          className="flex-1 flex items-center justify-center gap-1 text-xs py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 hover:bg-emerald-200 text-emerald-700 transition-colors">
                           <MessageSquare className="w-3 h-3" />واتساب
                         </button>
                       </div>
@@ -231,13 +268,21 @@ export default function CRMLeadsPage() {
                     <td className="px-4 py-3 text-center text-xs text-muted-foreground">{formatDate(lead.last_contact)}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 justify-end">
-                        <button onClick={() => toast.success(`اتصال بـ ${lead.name}`)}
+                        <button onClick={() => handleCall(lead)} title="اتصال"
                           className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-500 transition-colors">
                           <Phone className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => toast.success('فتح واتساب')}
+                        <button onClick={() => handleWhatsapp(lead)} title="واتساب"
                           className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-500 transition-colors">
                           <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => openEdit(lead)} title="تعديل"
+                          className="p-1.5 rounded-lg hover:bg-primary/10 text-primary transition-colors">
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setDeleteId(lead.id)} title="حذف"
+                          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
@@ -277,8 +322,9 @@ export default function CRMLeadsPage() {
         })}
       </div>
 
-      {/* Add Lead Modal */}
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="إضافة عميل محتمل جديد">
+      {/* Add/Edit Lead Modal */}
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditLead(null); setForm(EMPTY_FORM) }}
+        title={editLead ? 'تعديل العميل المحتمل' : 'إضافة عميل محتمل جديد'}>
         <div className="space-y-4 p-1">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -324,14 +370,22 @@ export default function CRMLeadsPage() {
             <textarea value={form.notes} onChange={e => setForm(p => ({...p, notes: e.target.value}))} className="form-input resize-none h-20" placeholder="تفاصيل إضافية..." />
           </div>
           <div className="flex gap-2 justify-end pt-2">
-            <button onClick={() => setShowForm(false)} className="btn-outline">إلغاء</button>
-            <button onClick={handleSubmit} disabled={saving} className="btn-primary gap-2">
-              {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
-              إضافة العميل
+            <button onClick={() => { setShowForm(false); setEditLead(null); setForm(EMPTY_FORM) }} className="btn-outline">إلغاء</button>
+            <button onClick={handleSubmit} disabled={createLead.isPending} className="btn-primary gap-2">
+              {createLead.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {editLead ? 'حفظ التعديلات' : 'إضافة العميل'}
             </button>
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!deleteId}
+        title="حذف العميل المحتمل"
+        message="هل أنت متأكد من حذف هذا العميل المحتمل؟"
+        onCancel={() => setDeleteId(null)}
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

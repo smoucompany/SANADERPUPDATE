@@ -4,6 +4,7 @@ import { BarChart3, Calendar, Download, FileText, Printer, CheckCircle, AlertTri
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import PageHeader from '@/components/shared/PageHeader'
+import { PrintAccountingHeader, PrintAccountingFooter } from '@/components/print/PrintAccountingHeader'
 import { formatCurrency, formatDate, today } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import * as XLSX from 'xlsx'
@@ -238,29 +239,17 @@ export default function TrialBalancePage() {
 
   return (
     <div className="space-y-6">
-      {/* ── PRINT ONLY REPORT HEADER ── */}
-      <div className="print-only mb-6" dir="rtl">
-        <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-4">
-          <div>
-            <h2 className="text-xl font-black text-black">مؤسسة سند للحلول التقنية</h2>
-            <p className="text-xs text-muted-foreground mt-1">قسم الحسابات والميزانية العامة</p>
-            <p className="text-[10px] text-muted-foreground">الرقم الضريبي: 300123456700003</p>
-          </div>
-          <div className="text-left" dir="ltr">
-            <h2 className="text-lg font-black text-black">SANAD SYSTEMS</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Financial Reports Division</p>
-            <p className="text-[10px] text-muted-foreground">Date: {formatDate(today())}</p>
-          </div>
-        </div>
-        <div className="text-center my-6">
-          <h1 className="text-2xl font-black text-black border-2 border-black py-2 bg-slate-50">
-            كشف ميزان المراجعة بالأرصدة والمجاميع
-          </h1>
-          <p className="text-xs text-muted-foreground mt-2 font-medium">
-            للفترة الممتدة من {formatDate(dateFrom)} إلى {formatDate(dateTo)}
-          </p>
-        </div>
-      </div>
+      {/* ── PRINT HEADER ── */}
+      <PrintAccountingHeader
+        reportTitle="كشف ميزان المراجعة بالأرصدة والمجاميع"
+        reportTitleEn="TRIAL BALANCE STATEMENT"
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        extraMeta={[
+          { label: 'حالة الميزان', value: isBalanced ? '✓ متوازن' : '⚠ غير متوازن' },
+          { label: 'عدد الحسابات', value: `${filteredRows.length} حساب` },
+        ]}
+      />
 
       {/* Page Header */}
       <div className="no-print">
@@ -269,7 +258,7 @@ export default function TrialBalancePage() {
           subtitle="ميزان المراجعة بالأرصدة والمجاميع للتأكد من توازن الحسابات وصحة العمليات"
           actions={
             <div className="flex gap-2">
-              <button onClick={() => window.print()} className="btn-outline gap-1.5 border-border hover:bg-muted text-foreground cursor-pointer">
+              <button type="button" onClick={e => { e.preventDefault(); window.print() }} className="btn-outline gap-1.5 border-border hover:bg-muted text-foreground cursor-pointer">
                 <Printer className="w-4 h-4" /> طباعة الميزان
               </button>
               <button onClick={handleExport} className="btn-primary gap-1.5 bg-primary text-white hover:brightness-110 cursor-pointer">
@@ -456,6 +445,9 @@ export default function TrialBalancePage() {
           </div>
         )}
       </div>
+
+      {/* ── PRINT FOOTER ── */}
+      <PrintAccountingFooter pageNote="كشف ميزان المراجعة — سري وخاص بالشركة" />
     </div>
   )
 }

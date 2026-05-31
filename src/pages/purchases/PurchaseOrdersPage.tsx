@@ -13,31 +13,26 @@ const STATUS_MAP: Record<string, { label: string; color: string; icon: React.Ele
   cancelled: { label: 'ملغي',          color: 'text-red-600 bg-red-100 dark:bg-red-900/30',               icon: XCircle },
 }
 
-const MOCK_ORDERS = [
-  { id: 'PO-2026-001', supplier: 'مؤسسة الأمل للتوريدات', date: '2026-05-10', expected: '2026-05-20', status: 'received',  total: 45000, items: 8  },
-  { id: 'PO-2026-002', supplier: 'شركة النجم التجارية',    date: '2026-05-15', expected: '2026-05-25', status: 'confirmed', total: 28500, items: 5  },
-  { id: 'PO-2026-003', supplier: 'مجموعة الخليج',          date: '2026-05-18', expected: '2026-05-28', status: 'sent',      total: 67200, items: 12 },
-  { id: 'PO-2026-004', supplier: 'مؤسسة الأمل للتوريدات', date: '2026-05-20', expected: '2026-06-01', status: 'draft',     total: 19800, items: 3  },
-  { id: 'PO-2026-005', supplier: 'شركة التقنية الحديثة',   date: '2026-05-22', expected: '2026-06-05', status: 'confirmed', total: 53000, items: 7  },
-  { id: 'PO-2026-006', supplier: 'مجموعة الخليج',          date: '2026-05-23', expected: '2026-06-08', status: 'cancelled', total: 12400, items: 2  },
-]
+
+type Order = { id: string; supplier: string; date: string; expected: string; status: string; total: number; items: number }
 
 export default function PurchaseOrdersPage() {
   const navigate = useNavigate()
+  const [orders] = useState<Order[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
-  const filtered = MOCK_ORDERS.filter(o => {
+  const filtered = orders.filter(o => {
     const matchSearch = o.id.includes(search) || o.supplier.includes(search)
     const matchStatus = statusFilter === 'all' || o.status === statusFilter
     return matchSearch && matchStatus
   })
 
   const stats = {
-    total:     MOCK_ORDERS.length,
-    confirmed: MOCK_ORDERS.filter(o => o.status === 'confirmed').length,
-    received:  MOCK_ORDERS.filter(o => o.status === 'received').length,
-    value:     MOCK_ORDERS.filter(o => o.status !== 'cancelled').reduce((s, o) => s + o.total, 0),
+    total:     orders.length,
+    confirmed: orders.filter(o => o.status === 'confirmed').length,
+    received:  orders.filter(o => o.status === 'received').length,
+    value:     orders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + o.total, 0),
   }
 
   const handleConvertToInvoice = (id: string) => {
@@ -48,7 +43,7 @@ export default function PurchaseOrdersPage() {
     <div className="space-y-5">
       <PageHeader
         title="أوامر الشراء"
-        subtitle={`${MOCK_ORDERS.length} أمر شراء`}
+        subtitle={`${orders.length} أمر شراء`}
         actions={
           <button onClick={() => toast.success('سيتم إضافة نموذج أمر شراء')} className="btn-primary gap-1.5">
             <Plus className="w-4 h-4" />أمر شراء جديد
@@ -134,7 +129,7 @@ export default function PurchaseOrdersPage() {
                       <button onClick={() => toast.success('عرض أمر الشراء')} className="btn-ghost p-1.5 rounded-lg text-muted-foreground hover:text-primary" title="عرض">
                         <Eye className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => window.print()} className="btn-ghost p-1.5 rounded-lg text-muted-foreground hover:text-blue-500" title="طباعة">
+                      <button type="button" onClick={() => window.print()} className="btn-ghost p-1.5 rounded-lg text-muted-foreground hover:text-blue-500" title="طباعة">
                         <Printer className="w-3.5 h-3.5" />
                       </button>
                       {(order.status === 'confirmed' || order.status === 'received') && (

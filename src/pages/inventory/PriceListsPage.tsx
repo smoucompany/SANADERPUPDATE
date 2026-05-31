@@ -36,24 +36,9 @@ const TYPE_COLOR: Record<string, string> = {
   special: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30',
 }
 
-const MOCK_LISTS: PriceList[] = [
-  { id: '1', name: 'قائمة التجزئة',         type: 'retail',    currency: 'SAR', discount_pct: 0,  customer_count: 245, product_count: 120, is_active: true,  is_default: true  },
-  { id: '2', name: 'قائمة الجملة',           type: 'wholesale', currency: 'SAR', discount_pct: 15, customer_count: 38,  product_count: 120, is_active: true,  is_default: false },
-  { id: '3', name: 'قائمة عملاء VIP',        type: 'vip',       currency: 'SAR', discount_pct: 20, customer_count: 12,  product_count: 80,  is_active: true,  is_default: false },
-  { id: '4', name: 'عروض المقاولين',          type: 'special',   currency: 'SAR', discount_pct: 10, customer_count: 8,   product_count: 45,  is_active: false, is_default: false },
-]
-
-const MOCK_ITEMS: PriceItem[] = [
-  { id: 'a', list_id: '1', product: 'شاشة Samsung 27"',      sku: 'MON-SAM-27',  base_price: 1200, list_price: 1200, min_qty: 1  },
-  { id: 'b', list_id: '1', product: 'لوحة مفاتيح ميكانيكية', sku: 'KBD-MEC-01',  base_price: 320,  list_price: 320,  min_qty: 1  },
-  { id: 'c', list_id: '2', product: 'شاشة Samsung 27"',      sku: 'MON-SAM-27',  base_price: 1200, list_price: 1020, min_qty: 5  },
-  { id: 'd', list_id: '2', product: 'لوحة مفاتيح ميكانيكية', sku: 'KBD-MEC-01',  base_price: 320,  list_price: 272,  min_qty: 10 },
-  { id: 'e', list_id: '3', product: 'شاشة Samsung 27"',      sku: 'MON-SAM-27',  base_price: 1200, list_price: 960,  min_qty: 1  },
-  { id: 'f', list_id: '3', product: 'ذاكرة RAM 16GB',         sku: 'RAM-16-DDR5', base_price: 500,  list_price: 400,  min_qty: 1  },
-]
 
 export default function PriceListsPage() {
-  const [lists, setLists] = useState(MOCK_LISTS)
+  const [lists, setLists] = useState<PriceList[]>([])
   const [search, setSearch] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>('1')
   const [modal, setModal] = useState(false)
@@ -111,7 +96,7 @@ export default function PriceListsPage() {
       {/* Accordion lists */}
       <div className="space-y-3">
         {filtered.map(list => {
-          const items = MOCK_ITEMS.filter(i => i.list_id === list.id)
+          const items: PriceItem[] = []
           const isOpen = expandedId === list.id
           return (
             <div key={list.id} className="bg-card border border-border/60 rounded-2xl overflow-hidden">

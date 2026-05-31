@@ -32,65 +32,7 @@ const STATUS_CFG: Record<AppraisalStatus, { label: string; color: string }> = {
   final:     { label: 'نهائي',      color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30' },
 }
 
-const MOCK_APPRAISALS: Appraisal[] = [
-  {
-    id:'1', employee_id:'1', employee_name:'أحمد محمد العمري', avatar:'أح', department:'الإدارة العامة',
-    period:'Q1 2026', score:92, reviewer:'مجلس الإدارة', status:'final', date:'2026-04-15', notes:'أداء ممتاز في قيادة الفريق',
-    kpis:[
-      { label:'القيادة', score:95, weight:30 },
-      { label:'الإنتاجية', score:90, weight:25 },
-      { label:'التواصل', score:88, weight:20 },
-      { label:'الالتزام', score:95, weight:15 },
-      { label:'الابتكار', score:92, weight:10 },
-    ]
-  },
-  {
-    id:'2', employee_id:'2', employee_name:'سارة عبدالله الأحمدي', avatar:'سا', department:'المحاسبة',
-    period:'Q1 2026', score:88, reviewer:'أحمد العمري', status:'final', date:'2026-04-15', notes:'دقة عالية في العمل المحاسبي',
-    kpis:[
-      { label:'الدقة', score:95, weight:30 },
-      { label:'الإنتاجية', score:85, weight:25 },
-      { label:'التواصل', score:82, weight:20 },
-      { label:'الالتزام', score:90, weight:15 },
-      { label:'التطوير', score:80, weight:10 },
-    ]
-  },
-  {
-    id:'3', employee_id:'3', employee_name:'محمد خالد الغامدي', avatar:'مح', department:'المبيعات',
-    period:'Q1 2026', score:78, reviewer:'أحمد العمري', status:'reviewed', date:'2026-04-20', notes:'تحسّن ملحوظ في هذا الربع',
-    kpis:[
-      { label:'المبيعات', score:80, weight:35 },
-      { label:'خدمة العملاء', score:82, weight:25 },
-      { label:'الالتزام', score:75, weight:20 },
-      { label:'التعاون', score:70, weight:20 },
-    ]
-  },
-  {
-    id:'4', employee_id:'4', employee_name:'فاطمة علي الزهراني', avatar:'فا', department:'الموارد البشرية',
-    period:'Q1 2026', score:85, reviewer:'أحمد العمري', status:'submitted', date:'2026-04-25', notes:'',
-    kpis:[
-      { label:'التنظيم', score:90, weight:30 },
-      { label:'التواصل', score:85, weight:25 },
-      { label:'الالتزام', score:88, weight:25 },
-      { label:'الإبداع', score:75, weight:20 },
-    ]
-  },
-  {
-    id:'5', employee_id:'5', employee_name:'عمر عبدالرحمن القحطاني', avatar:'عم', department:'تقنية المعلومات',
-    period:'Q1 2026', score:95, reviewer:'أحمد العمري', status:'final', date:'2026-04-15', notes:'أفضل أداء في الفريق التقني',
-    kpis:[
-      { label:'التقنية', score:98, weight:35 },
-      { label:'حل المشكلات', score:95, weight:25 },
-      { label:'التوثيق', score:90, weight:20 },
-      { label:'الالتزام', score:95, weight:20 },
-    ]
-  },
-]
-
-const MONTHLY_TREND = [
-  { month: 'يناير', avg: 82 }, { month: 'فبراير', avg: 85 }, { month: 'مارس', avg: 83 },
-  { month: 'أبريل', avg: 87 }, { month: 'مايو', avg: 88 },
-]
+const MONTHLY_TREND: { month: string; avg: number }[] = []
 
 function ScoreBar({ score, color }: { score: number; color: string }) {
   return (
@@ -123,9 +65,10 @@ export default function HRPerformancePage() {
   const [filterStatus, setFilterStatus] = useState<AppraisalStatus | ''>('')
   const [saving, setSaving] = useState(false)
 
-  const avgScore = Math.round(MOCK_APPRAISALS.reduce((s, a) => s + a.score, 0) / MOCK_APPRAISALS.length)
-  const filtered = MOCK_APPRAISALS.filter(a => !filterStatus || a.status === filterStatus)
-  const topPerformer = [...MOCK_APPRAISALS].sort((a, b) => b.score - a.score)[0]
+  const [appraisals] = useState<Appraisal[]>([])
+  const avgScore = appraisals.length > 0 ? Math.round(appraisals.reduce((s, a) => s + a.score, 0) / appraisals.length) : 0
+  const filtered = appraisals.filter(a => !filterStatus || a.status === filterStatus)
+  const topPerformer = appraisals.length > 0 ? [...appraisals].sort((a, b) => b.score - a.score)[0] : null
 
   const radarData = selectedAppraisal?.kpis.map(k => ({ subject: k.label, A: k.score, fullMark: 100 })) || []
 
@@ -145,9 +88,9 @@ export default function HRPerformancePage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label:'متوسط الأداء', value:`${avgScore}%`, sub:'كل الموظفين', bg:'bg-primary', icon:TrendingUp },
-          { label:'تقييمات مكتملة', value:`${MOCK_APPRAISALS.filter(a => a.status === 'final').length}/${MOCK_APPRAISALS.length}`, sub:'هذا الربع', bg:'bg-emerald-500', icon:CheckCircle },
+          { label:'تقييمات مكتملة', value:`${appraisals.filter(a => a.status === 'final').length}/${appraisals.length}`, sub:'هذا الربع', bg:'bg-emerald-500', icon:CheckCircle },
           { label:'أعلى أداء', value:topPerformer?.score + '%', sub:topPerformer?.employee_name.split(' ')[0], bg:'bg-amber-500', icon:Award },
-          { label:'بحاجة للمتابعة', value:MOCK_APPRAISALS.filter(a => a.score < 75).length, sub:'موظف', bg:'bg-red-500', icon:Target },
+          { label:'بحاجة للمتابعة', value:appraisals.filter(a => a.score < 75).length, sub:'موظف', bg:'bg-red-500', icon:Target },
         ].map(s => (
           <div key={s.label} className="bg-card border border-border/60 rounded-2xl p-4 flex items-center gap-3">
             <div className={`w-10 h-10 ${s.bg} rounded-xl flex items-center justify-center shrink-0 shadow-sm`}>
@@ -262,16 +205,16 @@ export default function HRPerformancePage() {
             <h3 className="font-bold mb-4">توزيع التقييمات</h3>
             <div className="space-y-3">
               {[
-                { label: 'ممتاز (90-100)', count: MOCK_APPRAISALS.filter(a => a.score >= 90).length, color: 'bg-emerald-500' },
-                { label: 'جيد جداً (75-89)', count: MOCK_APPRAISALS.filter(a => a.score >= 75 && a.score < 90).length, color: 'bg-blue-500' },
-                { label: 'جيد (60-74)', count: MOCK_APPRAISALS.filter(a => a.score >= 60 && a.score < 75).length, color: 'bg-amber-500' },
-                { label: 'يحتاج تحسين (<60)', count: MOCK_APPRAISALS.filter(a => a.score < 60).length, color: 'bg-red-500' },
+                { label: 'ممتاز (90-100)', count: appraisals.filter(a => a.score >= 90).length, color: 'bg-emerald-500' },
+                { label: 'جيد جداً (75-89)', count: appraisals.filter(a => a.score >= 75 && a.score < 90).length, color: 'bg-blue-500' },
+                { label: 'جيد (60-74)', count: appraisals.filter(a => a.score >= 60 && a.score < 75).length, color: 'bg-amber-500' },
+                { label: 'يحتاج تحسين (<60)', count: appraisals.filter(a => a.score < 60).length, color: 'bg-red-500' },
               ].map(r => (
                 <div key={r.label} className="flex items-center gap-3">
                   <span className="text-xs text-muted-foreground w-28 text-right shrink-0">{r.label}</span>
                   <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
                     <div className={`h-full ${r.color} rounded-full`}
-                      style={{ width: `${(r.count / MOCK_APPRAISALS.length) * 100}%` }} />
+                      style={{ width: `${(r.count / appraisals.length) * 100}%` }} />
                   </div>
                   <span className="text-xs font-bold w-4 text-right">{r.count}</span>
                 </div>
@@ -289,7 +232,7 @@ export default function HRPerformancePage() {
               <label className="form-label">الموظف</label>
               <select className="form-select">
                 <option value="">اختر الموظف</option>
-                {MOCK_APPRAISALS.map(a => <option key={a.id} value={a.employee_id}>{a.employee_name}</option>)}
+                {appraisals.map(a => <option key={a.id} value={a.employee_id}>{a.employee_name}</option>)}
               </select>
             </div>
             <div>

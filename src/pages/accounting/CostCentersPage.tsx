@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Target, Edit2, Trash2, ChevronLeft, Save, Loader2 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/authStore'
 import { formatCurrency } from '@/lib/utils'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -17,44 +20,72 @@ type CostCenter = {
   is_active: boolean
 }
 
-const MOCK: CostCenter[] = [
-  { id:'1', code:'10', name:'الإدارة العامة', parent_id:null, budget:50000, actual:38400, level:0, is_active:true },
-  { id:'2', code:'10-01', name:'الموارد البشرية', parent_id:'1', budget:20000, actual:18200, level:1, is_active:true },
-  { id:'3', code:'10-02', name:'تقنية المعلومات', parent_id:'1', budget:15000, actual:12100, level:1, is_active:true },
-  { id:'4', code:'20', name:'المبيعات والتسويق', parent_id:null, budget:80000, actual:65000, level:0, is_active:true },
-  { id:'5', code:'20-01', name:'فريق المبيعات', parent_id:'4', budget:50000, actual:43500, level:1, is_active:true },
-  { id:'6', code:'20-02', name:'التسويق الرقمي', parent_id:'4', budget:20000, actual:15800, level:1, is_active:true },
-  { id:'7', code:'30', name:'الإنتاج والعمليات', parent_id:null, budget:120000, actual:98000, level:0, is_active:true },
-  { id:'8', code:'40', name:'المالية والمحاسبة', parent_id:null, budget:30000, actual:22500, level:0, is_active:true },
-]
 
 export default function CostCentersPage() {
+  const { user } = useAuthStore()
+  const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [deleteId, setDeleteId] = useState<string|null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ code:'', name:'', parent_id:'', budget:'0' })
 
-  const totalBudget = MOCK.filter(c => c.level === 0).reduce((s,c) => s + c.budget, 0)
-  const totalActual = MOCK.filter(c => c.level === 0).reduce((s,c) => s + c.actual, 0)
-  const utilization = Math.round((totalActual / totalBudget) * 100)
+  const { data: centers = [] } = useQuery<CostCenter[]>({
+    queryKey: ['cost_centers', user?.company_id],
+    queryFn: async () => {
+      if (!user) return []
+      const { data } = await supabase.from('cost_centers').select('*').eq('company_id', user.company_id).eq('is_active', true).order('code')
+      return (data as CostCenter[]) || []
+    },
+    enabled: !!user,
+  })
 
-  const topLevelCenters = MOCK.filter(c => c.level === 0)
+  const totalBudget = centers.filter(c => c.level === 0).reduce((s,c) => s + c.budget, 0)
+  const totalActual = centers.filter(c => c.level === 0).reduce((s,c) => s + c.actual, 0)
+  const utilization = totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0
+
+  const topLevelCenters = centers.filter(c => c.level === 0)
 
   const handleSave = async () => {
     if (!form.code || !form.name) { toast.error('الكود والاسم مطلوبان'); return }
     setSaving(true)
-    await new Promise(r => setTimeout(r, 700))
-    setSaving(false)
-    toast.success('تم إضافة مركز التكلفة')
-    setShowForm(false)
-    setForm({ code:'', name:'', parent_id:'', budget:'0' })
+    try {
+      const parent = form.parent_id ? centers.find(c => c.id === form.parent_id) : null
+      const { error } = await supabase.from('cost_centers').insert({
+        company_id: user!.company_id,
+        code:       form.code,
+        name:       form.name,
+        parent_id:  form.parent_id || null,
+        budget:     parseFloat(form.budget) || 0,
+        actual:     0,
+        level:      parent ? parent.level + 1 : 0,
+        is_active:  true,
+      })
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['cost_centers'] })
+      toast.success('تم إضافة مركز التكلفة')
+      setShowForm(false)
+      setForm({ code:'', name:'', parent_id:'', budget:'0' })
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+    const { error } = await supabase.from('cost_centers').update({ is_active: false }).eq('id', deleteId)
+    if (error) { toast.error(error.message); return }
+    qc.invalidateQueries({ queryKey: ['cost_centers'] })
+    toast.success('تم حذف مركز التكلفة')
+    setDeleteId(null)
   }
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="مراكز التكلفة"
-        subtitle={`${MOCK.length} مركز تكلفة`}
+        subtitle={`${centers.length} مركز تكلفة`}
         actions={
           <button onClick={() => setShowForm(true)} className="btn-primary gap-1.5">
             <Plus className="w-4 h-4" />إضافة مركز
@@ -88,8 +119,8 @@ export default function CostCentersPage() {
         </div>
         <div className="divide-y divide-border/40">
           {topLevelCenters.map(center => {
-            const children = MOCK.filter(c => c.parent_id === center.id)
-            const pct = Math.round((center.actual / center.budget) * 100)
+            const children = centers.filter(c => c.parent_id === center.id)
+            const pct = center.budget > 0 ? Math.round((center.actual / center.budget) * 100) : 0
             return (
               <div key={center.id}>
                 {/* Parent */}
@@ -129,7 +160,7 @@ export default function CostCentersPage() {
 
                 {/* Children */}
                 {children.map(child => {
-                  const childPct = Math.round((child.actual / child.budget) * 100)
+                  const childPct = child.budget > 0 ? Math.round((child.actual / child.budget) * 100) : 0
                   return (
                     <div key={child.id} className="flex items-center gap-4 px-5 py-3 hover:bg-muted/10 transition-colors bg-muted/5">
                       <div className="w-4 shrink-0" />
@@ -203,7 +234,7 @@ export default function CostCentersPage() {
         </div>
       </Modal>
 
-      <ConfirmDialog open={!!deleteId} onCancel={() => setDeleteId(null)} onConfirm={() => { toast.success('تم الحذف'); setDeleteId(null) }}
+      <ConfirmDialog open={!!deleteId} onCancel={() => setDeleteId(null)} onConfirm={handleDelete}
         title="حذف مركز التكلفة" message="هل أنت متأكد؟ سيتم حذف مركز التكلفة." />
     </div>
   )

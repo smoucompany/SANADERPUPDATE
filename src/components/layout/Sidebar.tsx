@@ -5,7 +5,8 @@ import {
   Warehouse, Users, Truck, BookOpen, Receipt,
   CreditCard, BarChart3, Settings, UserCog,
   ChevronLeft, Building2, Sparkles, Briefcase, MessageCircle,
-  FileText, Boxes, Tags, DollarSign, Layers, Scale, TrendingUp
+  FileText, Boxes, Tags, DollarSign, Layers, Scale, TrendingUp,
+  Wallet, ChefHat, Shield, ClipboardList, ArrowLeftRight
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/store/settingsStore'
@@ -49,9 +50,10 @@ const navItems: NavItem[] = [
     icon: ShoppingBag,
     iconColor: 'apple-purple',
     children: [
-      { label: 'فواتير الشراء',    icon: FileText,   iconColor: 'apple-purple', href: '/purchases' },
-      { label: 'أوامر الشراء',     icon: ShoppingBag,iconColor: 'apple-indigo', href: '/purchases/orders' },
-      { label: 'مرتجعات الشراء',  icon: TrendingUp, iconColor: 'apple-red',    href: '/purchases/returns' },
+      { label: 'فواتير الشراء',    icon: FileText,      iconColor: 'apple-purple', href: '/purchases' },
+      { label: 'أوامر الشراء',     icon: ShoppingBag,   iconColor: 'apple-indigo', href: '/purchases/orders' },
+      { label: 'مرتجعات الشراء',  icon: TrendingUp,    iconColor: 'apple-red',    href: '/purchases/returns' },
+      { label: 'سلة المحذوفات',    icon: Boxes,         iconColor: 'apple-gray',   href: '/purchases/deleted' },
     ]
   },
   {
@@ -59,14 +61,23 @@ const navItems: NavItem[] = [
     icon: Boxes,
     iconColor: 'apple-teal',
     children: [
-      { label: 'المنتجات',           icon: Package,   iconColor: 'apple-teal',   href: '/products' },
-      { label: 'حركة المخزون',      icon: Warehouse, iconColor: 'apple-cyan',   href: '/inventory' },
-      { label: 'تحويل مخزون',       icon: Warehouse, iconColor: 'apple-mint',   href: '/inventory/transfer' },
-      { label: 'جرد وتسوية',        icon: Boxes,     iconColor: 'apple-orange', href: '/inventory/adjustment' },
-      { label: 'تنبيهات المخزون',   icon: Boxes,     iconColor: 'apple-red',    href: '/inventory/alerts' },
-      { label: 'قوائم الأسعار',     icon: Tags,      iconColor: 'apple-yellow', href: '/price-lists' },
-      { label: 'التصنيفات',          icon: Tags,      iconColor: 'apple-indigo', href: '/categories' },
-      { label: 'طباعة باركود',      icon: Tags,      iconColor: 'apple-brown',  href: '/products/barcodes' },
+      { label: 'المنتجات',              icon: Package,        iconColor: 'apple-teal',   href: '/products' },
+      { label: 'مخزن الوارد (1)',       icon: Warehouse,      iconColor: 'apple-blue',   href: '/inventory/warehouse1' },
+      { label: 'تحويل 1 → 2 (FIFO)',   icon: ArrowLeftRight, iconColor: 'apple-green',  href: '/inventory/warehouse-transfer' },
+      { label: 'حركة المخزون',         icon: Warehouse,      iconColor: 'apple-cyan',   href: '/inventory' },
+      { label: 'جرد وتسوية',           icon: Boxes,          iconColor: 'apple-orange', href: '/inventory/adjustment' },
+      { label: 'تنبيهات المخزون',      icon: Boxes,          iconColor: 'apple-red',    href: '/inventory/alerts' },
+      { label: 'قوائم الأسعار',        icon: Tags,           iconColor: 'apple-yellow', href: '/price-lists' },
+      { label: 'التصنيفات',             icon: Tags,           iconColor: 'apple-indigo', href: '/categories' },
+      { label: 'طباعة باركود',         icon: Tags,           iconColor: 'apple-brown',  href: '/products/barcodes' },
+    ]
+  },
+  {
+    label: 'إدارة المطعم',
+    icon: ChefHat,
+    iconColor: 'apple-orange',
+    children: [
+      { label: 'الرسبي (Recipes)',  icon: ChefHat,      iconColor: 'apple-orange', href: '/recipes' },
     ]
   },
   {
@@ -74,8 +85,9 @@ const navItems: NavItem[] = [
     icon: Users,
     iconColor: 'apple-pink',
     children: [
-      { label: 'العملاء',  icon: Users, iconColor: 'apple-pink',  href: '/customers' },
-      { label: 'الموردون', icon: Truck, iconColor: 'apple-brown', href: '/suppliers' },
+      { label: 'العملاء',         icon: Users,     iconColor: 'apple-pink',   href: '/customers' },
+      { label: 'الموردون',        icon: Truck,     iconColor: 'apple-brown',  href: '/suppliers' },
+      { label: 'مدفوعات الموردين',icon: CreditCard,iconColor: 'apple-purple', href: '/suppliers/payments' },
     ]
   },
   {
@@ -88,8 +100,10 @@ const navItems: NavItem[] = [
       { label: 'دفتر الأستاذ العام',   icon: BookOpen,   iconColor: 'apple-teal',   href: '/general-ledger' },
       { label: 'ميزان المراجعة',       icon: Scale,      iconColor: 'apple-yellow', href: '/trial-balance' },
       { label: 'القوائم المالية',       icon: TrendingUp, iconColor: 'apple-green',  href: '/financial-statements' },
-      { label: 'الحسابات البنكية',     icon: CreditCard, iconColor: 'apple-cyan',   href: '/bank-accounts' },
-      { label: 'مراكز التكلفة',        icon: Layers,     iconColor: 'apple-purple', href: '/cost-centers' },
+      { label: 'الحسابات البنكية',     icon: CreditCard,  iconColor: 'apple-cyan',   href: '/bank-accounts' },
+      { label: 'إيداعات بنكية',        icon: TrendingUp,  iconColor: 'apple-green',  href: '/bank/deposits' },
+      { label: 'سحوبات بنكية',         icon: TrendingUp,  iconColor: 'apple-red',    href: '/bank/withdrawals' },
+      { label: 'مراكز التكلفة',        icon: Layers,      iconColor: 'apple-purple', href: '/cost-centers' },
       { label: 'الأصول الثابتة',       icon: Building2,  iconColor: 'apple-brown',  href: '/assets' },
       { label: 'سندات القبض والصرف',  icon: CreditCard, iconColor: 'apple-green',  href: '/vouchers' },
       { label: 'المصروفات',            icon: DollarSign, iconColor: 'apple-red',    href: '/expenses' },
@@ -130,12 +144,24 @@ const navItems: NavItem[] = [
     ]
   },
   {
+    label: 'الخزائن',
+    icon: Wallet,
+    iconColor: 'apple-green',
+    children: [
+      { label: 'إدارة الخزائن',      icon: Wallet,         iconColor: 'apple-green',  href: '/cashbox' },
+      { label: 'مستندات التحويل',    icon: ArrowLeftRight, iconColor: 'apple-blue',   href: '/cashbox/transfers' },
+      { label: 'حركة الخزائن',       icon: TrendingUp,     iconColor: 'apple-teal',   href: '/cashbox/movements' },
+    ]
+  },
+  {
     label: 'الإدارة',
     icon: Building2,
     iconColor: 'apple-gray',
     children: [
-      { label: 'المستخدمون', icon: UserCog,  iconColor: 'apple-gray',  href: '/users' },
-      { label: 'الإعدادات',  icon: Settings, iconColor: 'apple-brown', href: '/settings' },
+      { label: 'المستخدمون',       icon: UserCog,       iconColor: 'apple-gray',   href: '/users' },
+      { label: 'الصلاحيات',        icon: Shield,        iconColor: 'apple-purple', href: '/permissions' },
+      { label: 'سجل التدقيق',      icon: ClipboardList, iconColor: 'apple-blue',   href: '/audit-log' },
+      { label: 'الإعدادات',        icon: Settings,      iconColor: 'apple-brown',  href: '/settings' },
     ]
   },
 ]

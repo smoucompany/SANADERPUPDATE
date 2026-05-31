@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
 interface ReceiptItem {
@@ -40,7 +41,7 @@ const DOUBLE  = '═════════════════════
 export function PrintReceiptThermal({ invoice, items, company, cashierName, customerName }: PrintReceiptThermalProps) {
   const change = Math.max(0, (invoice.paid_amount ?? 0) - invoice.total)
 
-  return (
+  return createPortal(
     <div className="print-thermal-wrapper" dir="rtl">
 
       {/* Header */}
@@ -195,6 +196,7 @@ export function PrintReceiptThermal({ invoice, items, company, cashierName, cust
         <div className="print-thermal-footer-line">{company.name_ar} © {new Date().getFullYear()}</div>
       </div>
 
-    </div>
+    </div>,
+    document.body
   )
 }

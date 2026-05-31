@@ -41,7 +41,7 @@ export default function SupplierAccountPage() {
             <button onClick={handleExportExcel} className="btn-outline gap-1.5">
               <Download className="w-4 h-4" />تصدير Excel
             </button>
-            <button onClick={() => printElement('supplier-statement')} className="btn-primary gap-1.5">
+            <button type="button" onClick={() => printElement('supplier-statement')} className="btn-primary gap-1.5">
               <Printer className="w-4 h-4" />طباعة الكشف
             </button>
           </>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Users, UserCheck, UserX, Briefcase, Phone, Mail, Edit2, Trash2, Eye, Search, Download } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -26,14 +26,6 @@ type Employee = {
 
 const DEPARTMENTS = ['الإدارة العامة','المبيعات','المشتريات','المحاسبة والمالية','المخزون والعمليات','الموارد البشرية','تقنية المعلومات','التسويق']
 
-const MOCK: Employee[] = [
-  { id:'1', employee_number:'EMP-001', full_name:'أحمد محمد العمري', phone:'0501234567', email:'ahmed@company.com', department:'الإدارة العامة', position:'مدير عام', hire_date:'2020-01-15', salary:25000, status:'active', avatar_initials:'أح' },
-  { id:'2', employee_number:'EMP-002', full_name:'سارة عبدالله الأحمدي', phone:'0507654321', email:'sara@company.com', department:'المحاسبة والمالية', position:'محاسب أول', hire_date:'2021-03-10', salary:12000, status:'active', avatar_initials:'سا' },
-  { id:'3', employee_number:'EMP-003', full_name:'محمد خالد الغامدي', phone:'0509876543', email:'mohammed@company.com', department:'المبيعات', position:'مدير مبيعات', hire_date:'2021-06-01', salary:15000, status:'active', avatar_initials:'مح' },
-  { id:'4', employee_number:'EMP-004', full_name:'فاطمة علي الزهراني', phone:'0505551234', email:'fatima@company.com', department:'الموارد البشرية', position:'مسؤول موارد بشرية', hire_date:'2022-02-20', salary:10000, status:'on_leave', avatar_initials:'فا' },
-  { id:'5', employee_number:'EMP-005', full_name:'عمر عبدالرحمن القحطاني', phone:'0503214567', email:'omar@company.com', department:'تقنية المعلومات', position:'مهندس نظم', hire_date:'2022-09-15', salary:18000, status:'active', avatar_initials:'عم' },
-  { id:'6', employee_number:'EMP-006', full_name:'نورة سالم الشمري', phone:'0508765432', email:'noura@company.com', department:'التسويق', position:'مصمم جرافيك', hire_date:'2023-01-10', salary:9000, status:'active', avatar_initials:'نو' },
-]
 
 const STATUS_COLORS: Record<string, string> = {
   active:   'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
@@ -46,27 +38,39 @@ const DEPT_COLORS = ['bg-blue-500','bg-emerald-500','bg-violet-500','bg-orange-5
 
 export default function EmployeesPage() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
+  const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
   const [deleteId, setDeleteId] = useState<string|null>(null)
 
-  const filtered = MOCK.filter(e =>
+  const { data: employees = [] } = useQuery<Employee[]>({
+    queryKey: ['employees', user?.company_id],
+    queryFn: async () => {
+      if (!user) return []
+      const { data } = await supabase.from('employees').select('*').eq('company_id', user.company_id).order('full_name')
+      return (data as Employee[]) || []
+    },
+    enabled: !!user,
+  })
+
+  const filtered = employees.filter(e =>
     (!search || e.full_name.includes(search) || e.employee_number.includes(search) || e.department.includes(search)) &&
     (!deptFilter || e.department === deptFilter)
   )
 
-  const active = MOCK.filter(e => e.status === 'active').length
-  const onLeave = MOCK.filter(e => e.status === 'on_leave').length
-  const totalSalary = MOCK.reduce((s,e) => s + e.salary, 0)
+  const active = employees.filter(e => e.status === 'active').length
+  const onLeave = employees.filter(e => e.status === 'on_leave').length
+  const totalSalary = employees.reduce((s,e) => s + e.salary, 0)
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="الموظفون"
-        subtitle={`${MOCK.length} موظف`}
+        subtitle={`${employees.length} موظف`}
         actions={
           <>
-            <button onClick={() => exportToExcel(MOCK.map(e => ({ الاسم:e.full_name, القسم:e.department, الراتب:e.salary })), 'الموظفون')} className="btn-outline gap-1.5">
+            <button onClick={() => exportToExcel(employees.map(e => ({ الاسم:e.full_name, القسم:e.department, الراتب:e.salary })), 'الموظفون')} className="btn-outline gap-1.5">
               <Download className="w-4 h-4" />تصدير
             </button>
             <button onClick={() => navigate('/hr/employees/new')} className="btn-primary gap-1.5">
@@ -79,7 +83,7 @@ export default function EmployeesPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label:'إجمالي الموظفين', value:MOCK.length, color:'text-foreground', icon:Users, bg:'bg-blue-500' },
+          { label:'إجمالي الموظفين', value:employees.length, color:'text-foreground', icon:Users, bg:'bg-blue-500' },
           { label:'نشط', value:active, color:'text-emerald-600', icon:UserCheck, bg:'bg-emerald-500' },
           { label:'في إجازة', value:onLeave, color:'text-amber-600', icon:Briefcase, bg:'bg-amber-500' },
           { label:'إجمالي الرواتب', value:formatCurrency(totalSalary), color:'text-primary', icon:Briefcase, bg:'bg-primary' },
@@ -171,8 +175,22 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      <ConfirmDialog open={!!deleteId} onCancel={() => setDeleteId(null)} onConfirm={() => { toast.success('تم حذف الموظف'); setDeleteId(null) }}
-        title="حذف الموظف" message="هل أنت متأكد؟ سيتم حذف بيانات الموظف بشكل نهائي." />
+      <ConfirmDialog
+        open={!!deleteId}
+        onCancel={() => setDeleteId(null)}
+        onConfirm={async () => {
+          const { error } = await supabase
+            .from('employees')
+            .update({ status: 'terminated' })
+            .eq('id', deleteId!)
+          if (error) { toast.error(error.message); return }
+          qc.invalidateQueries({ queryKey: ['employees'] })
+          toast.success('تم حذف الموظف')
+          setDeleteId(null)
+        }}
+        title="حذف الموظف"
+        message="هل أنت متأكد؟ سيتم إنهاء خدمة الموظف من النظام."
+      />
     </div>
   )
 }

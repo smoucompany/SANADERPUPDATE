@@ -1,404 +1,566 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { Plus, Trash2, Save, ArrowRight, Search, Printer, Loader2 } from 'lucide-react'
-import { useCreateInvoice, useInvoice, useUpdateInvoice } from '@/hooks/useInvoices'
-import { useProducts } from '@/hooks/useProducts'
-import { useCustomers, useCreateCustomer } from '@/hooks/useCustomers'
-import { useWarehouses } from '@/hooks/useWarehouses'
+import {
+  Plus, Trash2, Save, ArrowRight, Search, Loader2,
+  ChevronDown, Lock, AlertCircle, CheckCircle
+} from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
-import { formatCurrency, calculateDiscount, calculateVat, today } from '@/lib/utils'
+import { formatCurrency, today } from '@/lib/utils'
+import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
-import Modal from '@/components/shared/Modal'
-import type { InvoiceItem, Customer } from '@/types'
 import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 
-interface LineItem extends Partial<InvoiceItem> {
+interface SaleLine {
   _id: string
+  product_id?: string
+  product_name: string
+  quantity: number
+  unit_price: number
+  discount_amount: number
+  vat_rate: number
+  vat_amount: number
+  total: number
+  has_recipe: boolean
+}
+
+const COLLECTION_METHODS = [
+  { value: 'sub_cashbox', label: 'خزينة فرعية (كاشير)', icon: '💵' },
+  { value: 'bank',        label: 'حساب بنكي',           icon: '🏦' },
+]
+
+function calcLine(item: SaleLine): SaleLine {
+  const base   = item.quantity * item.unit_price - item.discount_amount
+  const vatAmt = base * (item.vat_rate / 100)
+  return { ...item, vat_amount: vatAmt, total: base + vatAmt }
 }
 
 export default function SaleFormPage() {
-  const navigate = useNavigate()
-  const { id } = useParams()
-  const isEdit = !!id
+  const navigate  = useNavigate()
+  const { id }    = useParams()
+  const isEdit    = !!id
+  const { company, user } = useAuthStore()
 
-  const { data: existingInvoice } = useInvoice(id)
-  const createInvoice = useCreateInvoice()
-  const updateInvoice = useUpdateInvoice()
-  const { data: products = [] } = useProducts({ is_active: true })
-  const { data: customers = [] } = useCustomers()
-  const { data: warehouses = [] } = useWarehouses()
-  const createCustomer = useCreateCustomer()
-  const { company } = useAuthStore()
+  const [customerId, setCustomerId]         = useState('')
+  const [customerName, setCustomerName]     = useState('')
+  const [invoiceDate, setInvoiceDate]       = useState(today())
+  const [dueDate, setDueDate]               = useState('')
+  const [collectionMethod, setCollectionMethod] = useState('sub_cashbox')
+  const [cashboxId, setCashboxId]           = useState('')
+  const [bankAccountId, setBankAccountId]   = useState('')
+  const [notes, setNotes]                   = useState('')
+  const [invoiceNumber, setInvoiceNumber]   = useState('')
+  const [saving, setSaving]                 = useState(false)
 
-  const [customerId, setCustomerId] = useState('')
-  const [warehouseId, setWarehouseId] = useState('')
-  const [invoiceDate, setInvoiceDate] = useState(today())
-  const [dueDate, setDueDate] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState<string>('cash')
-  const [notes, setNotes] = useState('')
-  const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage')
-  const [discountValue, setDiscountValue] = useState(0)
-  const [items, setItems] = useState<LineItem[]>([{ _id: '1', product_name: '', quantity: 1, unit_price: 0, discount_type: 'percentage', discount_value: 0, discount_amount: 0, vat_rate: company?.vat_rate || 15, vat_amount: 0, total: 0 }])
-  const [productSearch, setProductSearch] = useState('')
-  const [activeItemId, setActiveItemId] = useState<string | null>(null)
-  const [showNewCustomer, setShowNewCustomer] = useState(false)
-  const [newCustomerName, setNewCustomerName] = useState('')
-  const [newCustomerPhone, setNewCustomerPhone] = useState('')
+  const [lines, setLines] = useState<SaleLine[]>([{
+    _id: Date.now().toString(), product_name: '', quantity: 1, unit_price: 0,
+    discount_amount: 0, vat_rate: company?.vat_rate || 15, vat_amount: 0, total: 0, has_recipe: true
+  }])
 
-  // Load existing invoice
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerOpen, setCustomerOpen]     = useState(false)
+  const customerRef = useRef<HTMLDivElement>(null)
+  const [activeLineId, setActiveLineId]     = useState<string | null>(null)
+  const [productSearch, setProductSearch]   = useState('')
+
+  const { data: customers = [] } = useQuery({
+    queryKey: ['customers-active', company?.id],
+    queryFn: async () => {
+      if (!company?.id) return []
+      const { data } = await supabase.from('customers')
+        .select('id, name_ar, balance, phone')
+        .eq('company_id', company.id)
+        .is('deleted_at', null)
+        .eq('is_active', true)
+        .order('name_ar')
+      return data || []
+    },
+    enabled: !!company?.id
+  })
+
+  // جلب المنتجات التي لها رسبي معتمد فقط
+  const { data: productsWithRecipe = [] } = useQuery({
+    queryKey: ['products-with-recipe', company?.id],
+    queryFn: async () => {
+      if (!company?.id) return []
+      const { data: recipes } = await supabase
+        .from('recipes')
+        .select('product_id, product:products(id, name_ar, code, selling_price, vat_rate, category:categories(name_ar), unit:units(name_ar))')
+        .eq('company_id', company.id)
+        .eq('is_approved', true)
+        .eq('is_active', true)
+      return (recipes || []).map(r => r.product).filter(Boolean)
+    },
+    enabled: !!company?.id
+  })
+
+  const { data: subCashboxes = [] } = useQuery({
+    queryKey: ['sub-cashboxes', company?.id],
+    queryFn: async () => {
+      if (!company?.id) return []
+      const { data } = await supabase.from('cashboxes')
+        .select('id, name_ar, balance')
+        .eq('company_id', company.id)
+        .eq('is_main', false)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+      return data || []
+    },
+    enabled: !!company?.id
+  })
+
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bank-accounts', company?.id],
+    queryFn: async () => {
+      if (!company?.id) return []
+      const { data } = await supabase.from('bank_accounts')
+        .select('id, bank_name, account_number, balance')
+        .eq('company_id', company.id)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+      return data || []
+    },
+    enabled: !!company?.id
+  })
+
+  // توليد رقم فاتورة
   useEffect(() => {
-    if (existingInvoice) {
-      setCustomerId(existingInvoice.customer_id || '')
-      setWarehouseId(existingInvoice.warehouse_id || '')
-      setInvoiceDate(existingInvoice.invoice_date)
-      setDueDate(existingInvoice.due_date || '')
-      setPaymentMethod(existingInvoice.payment_method)
-      setNotes(existingInvoice.notes || '')
-      setDiscountType(existingInvoice.discount_type)
-      setDiscountValue(existingInvoice.discount_value)
-      if (existingInvoice.items) {
-        setItems(existingInvoice.items.map(item => ({ ...item, _id: item.id })))
+    if (!company?.id || isEdit) return
+    supabase.rpc('get_next_document_number', {
+      p_company_id: company.id, p_type: 'sale', p_prefix: 'INV'
+    }).then(({ data }) => { if (data) setInvoiceNumber(data) })
+  }, [company?.id, isEdit])
+
+  // إغلاق قائمة العملاء
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (customerRef.current && !customerRef.current.contains(e.target as Node)) {
+        setCustomerOpen(false)
       }
     }
-  }, [existingInvoice])
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
 
-  useEffect(() => {
-    if (warehouses.length > 0 && !warehouseId) {
-      setWarehouseId(warehouses.find(w => w.is_default)?.id || warehouses[0]?.id || '')
-    }
-  }, [warehouses])
+  const filteredCustomers = (customers as any[]).filter(c =>
+    !customerSearch || c.name_ar.includes(customerSearch)
+  )
 
-  const updateItem = (id: string, field: string, value: unknown) => {
-    setItems(prev => prev.map(item => {
-      if (item._id !== id) return item
-      const updated = { ...item, [field]: value }
+  const filteredProducts = (productsWithRecipe as any[]).filter(p =>
+    !productSearch || p?.name_ar?.includes(productSearch) || p?.code?.includes(productSearch)
+  )
 
-      // Recalculate if price/qty/discount changes
-      if (['quantity', 'unit_price', 'discount_type', 'discount_value', 'vat_rate'].includes(field)) {
-        const qty = Number(field === 'quantity' ? value : updated.quantity) || 0
-        const price = Number(field === 'unit_price' ? value : updated.unit_price) || 0
-        const dType = field === 'discount_type' ? value as 'percentage' | 'fixed' : updated.discount_type || 'percentage'
-        const dVal = Number(field === 'discount_value' ? value : updated.discount_value) || 0
-        const vatRate = Number(field === 'vat_rate' ? value : updated.vat_rate) || 0
+  const selectCustomer = (c: any) => {
+    setCustomerId(c.id); setCustomerName(c.name_ar)
+    setCustomerSearch(c.name_ar); setCustomerOpen(false)
+  }
 
-        const lineTotal = qty * price
-        const discountAmt = calculateDiscount(lineTotal, dType, dVal)
-        const afterDiscount = lineTotal - discountAmt
-        const { vatAmount } = calculateVat(afterDiscount, vatRate)
-        const total = afterDiscount + vatAmount
+  const selectProduct = (lineId: string, product: any) => {
+    setLines(prev => prev.map(l => {
+      if (l._id !== lineId) return l
+      return calcLine({
+        ...l,
+        product_id:   product.id,
+        product_name: product.name_ar,
+        unit_price:   product.selling_price || 0,
+        vat_rate:     product.vat_rate || 15,
+        has_recipe:   true
+      })
+    }))
+    setActiveLineId(null); setProductSearch('')
+  }
 
-        return {
-          ...updated,
-          discount_amount: discountAmt,
-          vat_amount: vatAmount,
-          total
-        }
-      }
-      return updated
+  const updateLine = (id: string, field: keyof SaleLine, value: any) => {
+    setLines(prev => prev.map(l => {
+      if (l._id !== id) return l
+      return calcLine({ ...l, [field]: value })
     }))
   }
 
-  const addItem = () => {
-    setItems(prev => [...prev, {
-      _id: crypto.randomUUID(),
-      product_name: '', quantity: 1, unit_price: 0,
-      discount_type: 'percentage', discount_value: 0, discount_amount: 0,
-      vat_rate: company?.vat_rate || 15, vat_amount: 0, total: 0
+  const addLine = () => {
+    setLines(prev => [...prev, {
+      _id: Date.now().toString(), product_name: '', quantity: 1, unit_price: 0,
+      discount_amount: 0, vat_rate: company?.vat_rate || 15, vat_amount: 0, total: 0, has_recipe: true
     }])
   }
 
-  const removeItem = (id: string) => {
-    if (items.length === 1) { toast.error('يجب أن تحتوي الفاتورة على بند واحد على الأقل'); return }
-    setItems(prev => prev.filter(i => i._id !== id))
+  const removeLine = (id: string) => {
+    if (lines.length <= 1) return toast.error('يجب بقاء سطر واحد على الأقل')
+    setLines(prev => prev.filter(l => l._id !== id))
   }
 
-  const selectProduct = (itemId: string, product: (typeof products)[0]) => {
-    updateItem(itemId, 'product_id', product.id)
-    updateItem(itemId, 'product_name', product.name_ar)
-    updateItem(itemId, 'barcode', product.barcode)
-    updateItem(itemId, 'unit_name', product.unit?.abbreviation)
-    updateItem(itemId, 'unit_price', product.selling_price)
-    updateItem(itemId, 'vat_rate', product.vat_rate || 0)
-    setActiveItemId(null)
-    setProductSearch('')
-  }
+  const subtotal   = lines.reduce((s, l) => s + (l.quantity * l.unit_price - l.discount_amount), 0)
+  const totalVat   = lines.reduce((s, l) => s + l.vat_amount, 0)
+  const grandTotal = subtotal + totalVat
 
-  // Totals
-  const subtotal = items.reduce((s, i) => s + (Number(i.quantity) * Number(i.unit_price)), 0)
-  const itemsDiscount = items.reduce((s, i) => s + (Number(i.discount_amount) || 0), 0)
-  const invoiceDiscount = calculateDiscount(subtotal - itemsDiscount, discountType, discountValue)
-  const taxAmount = items.reduce((s, i) => s + (Number(i.vat_amount) || 0), 0)
-  const total = subtotal - itemsDiscount - invoiceDiscount + taxAmount
+  const handleSave = async (draft = true) => {
+    // فحص المنتجات
+    if (lines.some(l => !l.product_name)) return toast.error('يجب تحديد المنتج في جميع الأسطر')
+    if (lines.some(l => l.quantity <= 0)) return toast.error('الكميات يجب أن تكون أكبر من صفر')
 
-  const handleSave = async (status: 'draft' | 'confirmed' = 'confirmed') => {
-    if (!items.some(i => i.product_name)) { toast.error('أضف منتجاً واحداً على الأقل'); return }
-
-    const invoiceData = {
-      customer_id: customerId || undefined,
-      warehouse_id: warehouseId || undefined,
-      invoice_date: invoiceDate,
-      due_date: dueDate || undefined,
-      payment_method: paymentMethod as 'cash' | 'mada' | 'transfer' | 'deferred',
-      subtotal,
-      discount_type: discountType,
-      discount_value: discountValue,
-      discount_amount: invoiceDiscount,
-      tax_amount: taxAmount,
-      total,
-      paid_amount: paymentMethod === 'deferred' ? 0 : total,
-      status,
-      notes
+    // فحص الرسبي
+    const noRecipeLines = lines.filter(l => l.product_id && !l.has_recipe)
+    if (noRecipeLines.length > 0) {
+      return toast.error(`بعض المنتجات ليس لها رسبي معتمد`)
     }
 
-    const lineItems = items.filter(i => i.product_name).map(({ _id, ...item }) => item)
+    // فحص طريقة التحصيل
+    if (!draft) {
+      if (collectionMethod === 'sub_cashbox' && !cashboxId) {
+        return toast.error('يجب اختيار الخزينة الفرعية للتحصيل')
+      }
+      if (collectionMethod === 'bank' && !bankAccountId) {
+        return toast.error('يجب اختيار الحساب البنكي')
+      }
+    }
 
+    setSaving(true)
     try {
-      if (isEdit && id) await updateInvoice.mutateAsync({ id, ...invoiceData })
-      else await createInvoice.mutateAsync({ invoice: invoiceData, items: lineItems })
-      navigate('/sales')
-    } catch { /* error toast shown by hook */ }
+      const invoiceData = {
+        company_id:      company!.id,
+        customer_id:     customerId || null,
+        invoice_date:    invoiceDate,
+        due_date:        dueDate || null,
+        payment_method:  collectionMethod === 'sub_cashbox' ? 'cash' : 'transfer',
+        cashbox_id:      collectionMethod === 'sub_cashbox' ? cashboxId || null : null,
+        bank_account_id: collectionMethod === 'bank' ? bankAccountId || null : null,
+        notes:           notes || null,
+        subtotal,
+        discount_amount: 0,
+        tax_amount:      totalVat,
+        total:           grandTotal,
+        paid_amount:     draft ? 0 : grandTotal,
+        remaining_amount: draft ? grandTotal : 0,
+        status:          draft ? 'draft' : 'confirmed',
+        user_id:         user?.id,
+        updated_at:      new Date().toISOString()
+      }
+
+      const itemsData = lines.map(l => ({
+        product_id:      l.product_id || null,
+        product_name:    l.product_name,
+        quantity:        l.quantity,
+        unit_price:      l.unit_price,
+        discount_amount: l.discount_amount,
+        vat_rate:        l.vat_rate,
+        vat_amount:      l.vat_amount,
+        total:           l.total
+      }))
+
+      let invoiceId = id
+
+      if (isEdit) {
+        await supabase.from('invoices').update(invoiceData).eq('id', id!)
+        await supabase.from('invoice_items').delete().eq('invoice_id', id!)
+        await supabase.from('invoice_items').insert(itemsData.map(it => ({ ...it, invoice_id: id! })))
+      } else {
+        const { data: newInv, error } = await supabase.from('invoices').insert({
+          ...invoiceData, invoice_number: invoiceNumber
+        }).select('id').single()
+        if (error) throw error
+        invoiceId = newInv.id
+        await supabase.from('invoice_items').insert(itemsData.map(it => ({ ...it, invoice_id: newInv.id })))
+
+        // إذا لم تكن مسودة، اعتمد تلقائياً
+        if (!draft) {
+          await supabase.rpc('approve_sale', {
+            p_invoice_id: newInv.id,
+            p_user_id: user!.id
+          })
+
+          // تحديث رصيد الخزينة الفرعية
+          if (collectionMethod === 'sub_cashbox' && cashboxId) {
+            const { data: box } = await supabase.from('cashboxes').select('balance').eq('id', cashboxId).single()
+            await supabase.from('cashboxes').update({ balance: (box?.balance || 0) + grandTotal }).eq('id', cashboxId)
+          }
+        }
+      }
+
+      toast.success(draft ? 'تم الحفظ كمسودة' : '✅ تم حفظ الفاتورة والاعتماد')
+      navigate(`/sales/${invoiceId}`)
+    } catch (err: any) {
+      toast.error(err.message || 'حدث خطأ')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const loading = createInvoice.isPending || updateInvoice.isPending
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-6 pb-20" dir="rtl">
       <PageHeader
-        title={isEdit ? 'تعديل الفاتورة' : 'فاتورة بيع جديدة'}
+        title={isEdit ? `تعديل فاتورة ${invoiceNumber}` : 'فاتورة مبيعات جديدة'}
+        subtitle="إصدار فاتورة مبيعات — المنتجات المسموح ببيعها لديها رسبي معتمد فقط"
         actions={
-          <>
-            <button onClick={() => navigate('/sales')} className="btn-outline gap-1.5">
-              <ArrowRight className="w-4 h-4" />رجوع
+          <div className="flex gap-2">
+            <button onClick={() => navigate('/sales')}
+              className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm hover:bg-gray-50">
+              <ArrowRight size={14} /> رجوع
             </button>
-            <button onClick={() => handleSave('draft')} disabled={loading} className="btn-outline gap-1.5">
-              حفظ كمسودة
+            <button onClick={() => handleSave(true)} disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              حفظ مسودة
             </button>
-            <button onClick={() => handleSave('confirmed')} disabled={loading} className="btn-primary gap-1.5">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              حفظ وتأكيد
+            <button onClick={() => handleSave(false)} disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+              اعتماد الفاتورة
             </button>
-          </>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Main Form */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* Header Info */}
-          <div className="bg-card border border-border/60 rounded-xl p-5">
-            <h3 className="font-semibold text-sm text-muted-foreground mb-4">معلومات الفاتورة</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="form-label">العميل</label>
-                <div className="flex gap-2">
-                  <select value={customerId} onChange={e => setCustomerId(e.target.value)} className="form-select flex-1">
-                    <option value="">عميل نقدي</option>
-                    {customers.map(c => <option key={c.id} value={c.id}>{c.name_ar}</option>)}
-                  </select>
-                  <button onClick={() => setShowNewCustomer(true)} className="btn-outline px-2.5" title="إضافة عميل جديد">
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="form-label">المستودع</label>
-                <select value={warehouseId} onChange={e => setWarehouseId(e.target.value)} className="form-select">
-                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name_ar}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="form-label">تاريخ الفاتورة</label>
-                <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} className="form-input" />
-              </div>
-              <div>
-                <label className="form-label">تاريخ الاستحقاق</label>
-                <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="form-input" />
-              </div>
-              <div>
-                <label className="form-label">طريقة الدفع</label>
-                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className="form-select">
-                  <option value="cash">نقدي</option>
-                  <option value="mada">مدى</option>
-                  <option value="transfer">تحويل بنكي</option>
-                  <option value="credit">بطاقة ائتمان</option>
-                  <option value="deferred">آجل</option>
-                  <option value="mixed">مختلط</option>
-                </select>
-              </div>
-              <div className="col-span-2">
-                <label className="form-label">ملاحظات</label>
-                <textarea value={notes} onChange={e => setNotes(e.target.value)} className="form-input resize-none h-16 text-sm" placeholder="ملاحظات اختيارية..." />
-              </div>
+      {/* بيانات الفاتورة */}
+      <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+          {/* رقم الفاتورة */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              رقم الفاتورة <span className="text-xs text-gray-400">(تلقائي)</span>
+            </label>
+            <div className="flex items-center gap-2 border border-gray-200 bg-gray-50 rounded-lg px-3 py-2">
+              <Lock size={14} className="text-gray-400" />
+              <span className="font-mono font-bold text-blue-700">{invoiceNumber || '...'}</span>
             </div>
           </div>
 
-          {/* Items */}
-          <div className="bg-card border border-border/60 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-border/50 flex items-center justify-between">
-              <h3 className="font-semibold text-sm text-muted-foreground">بنود الفاتورة</h3>
-              <button onClick={addItem} className="btn-primary text-xs py-1.5 px-3 gap-1">
-                <Plus className="w-3.5 h-3.5" />إضافة بند
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-48">المنتج</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-20">الكمية</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-28">السعر</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-24">الخصم %</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-20">ض.ق.م %</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-muted-foreground w-28">الإجمالي</th>
-                    <th className="w-10" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map(item => (
-                    <tr key={item._id} className="border-b border-border/50 hover:bg-muted/20">
-                      <td className="px-3 py-2">
-                        <div className="relative">
-                          <input
-                            value={item.product_name || ''}
-                            onChange={e => { updateItem(item._id, 'product_name', e.target.value); setActiveItemId(item._id); setProductSearch(e.target.value) }}
-                            onFocus={() => setActiveItemId(item._id)}
-                            className="form-input text-xs h-8"
-                            placeholder="اسم المنتج..."
-                          />
-                          {activeItemId === item._id && productSearch && (
-                            <div className="absolute top-full right-0 z-30 w-64 bg-popover border border-border rounded-xl shadow-xl overflow-hidden mt-1">
-                              {products.filter(p => p.name_ar.includes(productSearch) || p.barcode?.includes(productSearch)).slice(0, 8).map(p => (
-                                <button
-                                  key={p.id}
-                                  onMouseDown={() => selectProduct(item._id, p)}
-                                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted text-right text-xs"
-                                >
-                                  <div className="flex-1">
-                                    <p className="font-medium text-foreground">{p.name_ar}</p>
-                                    <p className="text-muted-foreground">{formatCurrency(p.selling_price)}</p>
-                                  </div>
-                                </button>
-                              ))}
-                              {products.filter(p => p.name_ar.includes(productSearch)).length === 0 && (
-                                <div className="px-3 py-2 text-xs text-muted-foreground text-center">لا توجد نتائج</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <input type="number" value={item.quantity || ''} onChange={e => updateItem(item._id, 'quantity', parseFloat(e.target.value) || 0)}
-                          className="form-input text-xs h-8 w-20" dir="ltr" min="0.001" step="0.001" />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input type="number" value={item.unit_price || ''} onChange={e => updateItem(item._id, 'unit_price', parseFloat(e.target.value) || 0)}
-                          className="form-input text-xs h-8 w-28" dir="ltr" min="0" step="0.01" />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input type="number" value={item.discount_value || ''} onChange={e => updateItem(item._id, 'discount_value', parseFloat(e.target.value) || 0)}
-                          className="form-input text-xs h-8 w-20" dir="ltr" min="0" max="100" />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input type="number" value={item.vat_rate ?? ''} onChange={e => updateItem(item._id, 'vat_rate', parseFloat(e.target.value) || 0)}
-                          className="form-input text-xs h-8 w-20" dir="ltr" min="0" max="100" />
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="font-bold text-sm">{formatCurrency(item.total || 0)}</span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <button onClick={() => removeItem(item._id)} className="text-destructive hover:bg-destructive/10 p-1 rounded-lg">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
+          {/* العميل */}
+          <div ref={customerRef}>
+            <label className="block text-sm font-medium mb-1">العميل</label>
+            <div className="relative">
+              <div className="flex items-center border rounded-lg px-3 py-2 gap-2 cursor-pointer"
+                onClick={() => setCustomerOpen(true)}>
+                <Search size={14} className="text-gray-400" />
+                <input value={customerSearch}
+                  onChange={e => { setCustomerSearch(e.target.value); setCustomerOpen(true); if (!e.target.value) { setCustomerId(''); setCustomerName('') } }}
+                  className="flex-1 outline-none bg-transparent text-sm" placeholder="ابحث باسم العميل..." />
+                <ChevronDown size={14} className="text-gray-400" />
+              </div>
+              {customerOpen && filteredCustomers.length > 0 && (
+                <div className="absolute top-full right-0 left-0 mt-1 bg-white border rounded-xl shadow-xl z-50 max-h-52 overflow-y-auto">
+                  {filteredCustomers.map((c: any) => (
+                    <button key={c.id} onClick={() => selectCustomer(c)}
+                      className="w-full text-right px-4 py-2.5 hover:bg-blue-50 border-b last:border-0 flex justify-between text-sm">
+                      <span>{c.name_ar}</span>
+                      {c.balance > 0 && <span className="text-red-500 text-xs">{formatCurrency(c.balance)}</span>}
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
+          </div>
+
+          {/* التاريخ */}
+          <div>
+            <label className="block text-sm font-medium mb-1">التاريخ <span className="text-red-500">*</span></label>
+            <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          {/* طريقة التحصيل */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              طريقة التحصيل <span className="text-red-500">*</span>
+            </label>
+            <select value={collectionMethod} onChange={e => setCollectionMethod(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm">
+              {COLLECTION_METHODS.map(m => (
+                <option key={m.value} value={m.value}>{m.icon} {m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* الخزينة الفرعية */}
+          {collectionMethod === 'sub_cashbox' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                الخزينة الفرعية <span className="text-red-500">*</span>
+              </label>
+              <select value={cashboxId} onChange={e => setCashboxId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm">
+                <option value="">-- اختر الخزينة --</option>
+                {(subCashboxes as any[]).map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name_ar} ({formatCurrency(c.balance)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* الحساب البنكي */}
+          {collectionMethod === 'bank' && (
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                الحساب البنكي <span className="text-red-500">*</span>
+              </label>
+              <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm">
+                <option value="">-- اختر الحساب --</option>
+                {(bankAccounts as any[]).map((b: any) => (
+                  <option key={b.id} value={b.id}>{b.bank_name} ({b.account_number})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="lg:col-span-3">
+            <label className="block text-sm font-medium mb-1">ملاحظات</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              rows={2} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
           </div>
         </div>
 
-        {/* Summary */}
-        <div className="space-y-4">
-          <div className="bg-card border border-border/60 rounded-xl p-5 space-y-4 sticky top-20">
-            <h3 className="font-semibold">ملخص الفاتورة</h3>
-            <div className="space-y-2.5 text-sm">
-              <div className="flex justify-between text-muted-foreground">
-                <span>{formatCurrency(subtotal)}</span><span>المجموع الفرعي</span>
-              </div>
-              {itemsDiscount > 0 && (
-                <div className="flex justify-between text-emerald-600">
-                  <span>-{formatCurrency(itemsDiscount)}</span><span>خصم البنود</span>
-                </div>
-              )}
-              <div className="flex gap-2 items-center">
-                <div className="flex gap-1.5 flex-1">
-                  <select value={discountType} onChange={e => setDiscountType(e.target.value as 'percentage' | 'fixed')}
-                    className="form-select text-xs h-8 w-20">
-                    <option value="percentage">%</option>
-                    <option value="fixed">مبلغ</option>
-                  </select>
-                  <input type="number" value={discountValue || ''} onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)}
-                    className="form-input text-xs h-8 flex-1" dir="ltr" placeholder="0" />
-                </div>
-                <span className="text-muted-foreground text-xs whitespace-nowrap">خصم الفاتورة</span>
-              </div>
-              {invoiceDiscount > 0 && (
-                <div className="flex justify-between text-emerald-600">
-                  <span>-{formatCurrency(invoiceDiscount)}</span><span>خصم الفاتورة</span>
-                </div>
-              )}
-              {taxAmount > 0 && (
-                <div className="flex justify-between text-muted-foreground">
-                  <span>{formatCurrency(taxAmount)}</span><span>ضريبة القيمة المضافة</span>
-                </div>
-              )}
-              <div className="flex justify-between font-bold text-lg text-foreground pt-2 border-t border-border">
-                <span>{formatCurrency(total)}</span><span>الإجمالي</span>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 pt-2">
-              <button onClick={() => handleSave('draft')} disabled={loading} className="btn-outline text-sm justify-center py-2.5">
-                مسودة
-              </button>
-              <button onClick={() => handleSave('confirmed')} disabled={loading} className="btn-primary text-sm justify-center py-2.5 gap-1.5">
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                حفظ
-              </button>
-            </div>
+        {/* تنبيه: لا يُسمح بالتحصيل على الخزينة الرئيسية */}
+        <div className="mt-3 p-3 bg-amber-50 rounded-lg text-sm text-amber-700 flex items-center gap-2">
+          <AlertCircle size={14} />
+          التحصيل يكون عبر الخزائن الفرعية أو البنك فقط. الخزينة الرئيسية محظورة للمبيعات.
+        </div>
+      </div>
+
+      {/* جدول الأصناف */}
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2">
+              أصناف الفاتورة ({lines.length})
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              يُعرض فقط المنتجات التي لها رسبي معتمد
+            </p>
+          </div>
+          <button onClick={addLine}
+            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm">
+            <Plus size={14} /> إضافة صنف
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[800px]">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-8">#</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600">المنتج</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-20">الكمية</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-24">سعر البيع</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-20">الخصم</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-20">%ض.ق.م</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-600 w-24">الإجمالي</th>
+                <th className="text-center px-3 py-3 w-12"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {lines.map((line, idx) => (
+                <tr key={line._id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 text-gray-400 text-center">{idx + 1}</td>
+                  <td className="px-3 py-2 relative">
+                    <div className="relative">
+                      <input
+                        value={activeLineId === line._id ? productSearch : line.product_name}
+                        onChange={e => {
+                          if (activeLineId !== line._id) setActiveLineId(line._id)
+                          setProductSearch(e.target.value)
+                          updateLine(line._id, 'product_name', e.target.value)
+                        }}
+                        onFocus={() => { setActiveLineId(line._id); setProductSearch('') }}
+                        className="w-full border rounded-lg px-2 py-1.5 text-sm"
+                        placeholder="اسم المنتج (برسبي معتمد فقط)..." />
+
+                      {activeLineId === line._id && filteredProducts.length > 0 && (
+                        <div className="absolute top-full right-0 mt-1 bg-white border rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto min-w-[260px]">
+                          {filteredProducts.slice(0, 15).map((p: any) => (
+                            <button key={p.id} onMouseDown={() => selectProduct(line._id, p)}
+                              className="w-full text-right px-3 py-2 hover:bg-blue-50 border-b last:border-0 flex items-center justify-between">
+                              <div>
+                                <div className="font-medium text-sm">{p?.name_ar}</div>
+                                <div className="text-xs text-gray-400">{p?.category?.name_ar}</div>
+                              </div>
+                              <span className="text-blue-600 text-xs">{formatCurrency(p?.selling_price)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {activeLineId === line._id && productSearch && filteredProducts.length === 0 && (
+                        <div className="absolute top-full right-0 mt-1 bg-white border rounded-xl shadow-xl z-50 p-4 text-center text-sm text-gray-500 min-w-[200px]">
+                          لا توجد منتجات بهذا الاسم أو ليس لها رسبي معتمد
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <input type="number" value={line.quantity} min="0.001" step="0.001"
+                      onChange={e => updateLine(line._id, 'quantity', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input type="number" value={line.unit_price} min="0" step="0.01"
+                      onChange={e => updateLine(line._id, 'unit_price', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input type="number" value={line.discount_amount} min="0" step="0.01"
+                      onChange={e => updateLine(line._id, 'discount_amount', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input type="number" value={line.vat_rate} min="0" max="100"
+                      onChange={e => updateLine(line._id, 'vat_rate', parseFloat(e.target.value) || 0)}
+                      className="w-full border rounded px-2 py-1.5 text-sm text-center" />
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium text-blue-700">
+                    {formatCurrency(line.total)}
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <button onClick={() => removeLine(line._id)}
+                      className="p-1 hover:bg-red-50 rounded text-red-500">
+                      <Trash2 size={13} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* الإجماليات */}
+      <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="max-w-sm mr-auto space-y-3">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">الإجمالي قبل الضريبة:</span>
+            <span className="font-medium">{formatCurrency(subtotal)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">ضريبة القيمة المضافة:</span>
+            <span className="text-orange-600">{formatCurrency(totalVat)}</span>
+          </div>
+          <div className="flex justify-between font-bold text-lg border-t pt-3">
+            <span>الإجمالي الكلي:</span>
+            <span className="text-blue-700">{formatCurrency(grandTotal)}</span>
           </div>
         </div>
       </div>
 
-      {/* New Customer Modal */}
-      <Modal open={showNewCustomer} onClose={() => setShowNewCustomer(false)} title="إضافة عميل جديد" size="sm"
-        footer={
-          <>
-            <button onClick={() => setShowNewCustomer(false)} className="btn-outline">إلغاء</button>
-            <button onClick={async () => {
-              if (!newCustomerName) { toast.error('اسم العميل مطلوب'); return }
-              const result = await createCustomer.mutateAsync({ name_ar: newCustomerName, phone: newCustomerPhone })
-              setCustomerId((result as Customer).id)
-              setShowNewCustomer(false)
-              setNewCustomerName('')
-              setNewCustomerPhone('')
-            }} className="btn-primary">
-              <Plus className="w-4 h-4" />إضافة
-            </button>
-          </>
-        }>
-        <div className="space-y-3">
-          <div>
-            <label className="form-label">اسم العميل *</label>
-            <input value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} className="form-input" placeholder="اسم العميل" autoFocus />
-          </div>
-          <div>
-            <label className="form-label">رقم الجوال</label>
-            <input value={newCustomerPhone} onChange={e => setNewCustomerPhone(e.target.value)} className="form-input" dir="ltr" placeholder="05xxxxxxxx" />
-          </div>
+      {/* شريط الأزرار السفلي */}
+      <div className="fixed bottom-0 right-0 left-0 bg-white border-t px-6 py-4 flex justify-between items-center z-40">
+        <div className="text-sm text-gray-500">
+          {lines.length} صنف | الإجمالي: <span className="font-bold text-blue-700">{formatCurrency(grandTotal)}</span>
         </div>
-      </Modal>
+        <div className="flex gap-3">
+          <button onClick={() => navigate('/sales')} className="px-4 py-2 border rounded-lg text-sm">إلغاء</button>
+          <button onClick={() => handleSave(true)} disabled={saving}
+            className="px-4 py-2 border rounded-lg text-sm flex items-center gap-2">
+            {saving && <Loader2 size={13} className="animate-spin" />} مسودة
+          </button>
+          <button onClick={() => handleSave(false)} disabled={saving}
+            className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm flex items-center gap-2">
+            {saving && <Loader2 size={13} className="animate-spin" />}
+            <CheckCircle size={14} /> اعتماد الفاتورة
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+﻿import { useState } from 'react'
+import { useParams, Navigate } from 'react-router-dom'
 import { MessageSquare, Mail, Smartphone, Eye, EyeOff, Key, Copy, RefreshCw, Save } from 'lucide-react'
 import { SectionCard, SettingRow, Toggle } from './shared'
 import toast from 'react-hot-toast'
@@ -162,5 +162,5 @@ export default function IntegrationsSettings() {
     </div>
   )
 
-  return null
+  return <Navigate to="/settings/integrations/api" replace />
 }
