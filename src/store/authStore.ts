@@ -4,51 +4,54 @@ import { supabase } from '@/lib/supabase'
 import type { User, Company } from '@/types'
 
 interface AuthState {
-  user: User | null
-  company: Company | null
-  session: unknown | null
-  isLoading: boolean
+  user:            User | null
+  company:         Company | null
+  session:         unknown | null
+  isLoading:       boolean
   isAuthenticated: boolean
-  setUser: (user: User | null) => void
-  setCompany: (company: Company | null) => void
-  setSession: (session: unknown) => void
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signOut: () => Promise<void>
+  setUser:         (user: User | null) => void
+  setCompany:      (company: Company | null) => void
+  setSession:      (session: unknown) => void
+  signIn:          (email: string, password: string) => Promise<{ error: string | null }>
+  signOut:         () => Promise<void>
   loadUserProfile: () => Promise<void>
-  hasPermission: (module: string, action: string) => boolean
+  hasPermission:   (module: string, action: string) => boolean
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
-      user: null,
-      company: null,
-      session: null,
-      isLoading: false,
+      user:            null,
+      company:         null,
+      session:         null,
+      isLoading:       false,
       isAuthenticated: false,
 
-      setUser: (user) => set({ user, isAuthenticated: !!user }),
+      setUser:    (user)    => set({ user, isAuthenticated: !!user }),
       setCompany: (company) => set({ company }),
       setSession: (session) => set({ session }),
 
       signIn: async (email, password) => {
+        set({ isLoading: true })
         try {
           const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-          if (error) return { error: error.message }
+          if (error) { set({ isLoading: false }); return { error: error.message } }
           set({ session: data.session, isAuthenticated: true })
-          get().loadUserProfile()
+          await get().loadUserProfile()
           return { error: null }
-        } catch (err) {
+        } catch {
+          set({ isLoading: false })
           return { error: 'حدث خطأ غير متوقع' }
         }
       },
 
       signOut: async () => {
         await supabase.auth.signOut()
-        set({ user: null, company: null, session: null, isAuthenticated: false })
+        set({ user: null, company: null, session: null, isAuthenticated: false, isLoading: false })
       },
 
       loadUserProfile: async () => {
+        set({ isLoading: true })
         try {
           const { data: { user: authUser } } = await supabase.auth.getUser()
           if (!authUser) {
@@ -56,39 +59,39 @@ export const useAuthStore = create<AuthState>()(
             return
           }
 
-          // Race profile fetch against 8s timeout so we never hang
-          const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
-            Promise.race([p, new Promise<null>(r => setTimeout(() => r(null), ms))])
+          // Fetch only needed columns — much faster than select('*')
+          const { data: profile, error: profileError } = await supabase
+            .from('users')
+            .select('id, company_id, role, full_name, phone, avatar_url, is_active, permissions, last_login')
+            .eq('id', authUser.id)
+            .single()
 
-          const profileResult = await withTimeout(
-            Promise.resolve(supabase.from('users').select('*').eq('id', authUser.id).single())
-              .then(r => r.data),
-            8000
-          )
-
-          if (!profileResult) {
-            // DB unreachable or no profile — stay authenticated if we have persisted data
+          if (profileError || !profile) {
+            // DB unreachable — keep auth state from persisted store
             set({ isLoading: false, isAuthenticated: true })
             return
           }
 
-          const companyResult = await withTimeout(
-            Promise.resolve(supabase.from('companies').select('*').eq('id', (profileResult as any).company_id).single())
-              .then(r => r.data),
-            8000
-          )
+          const { data: company, error: companyError } = await supabase
+            .from('companies')
+            .select('id, name_ar, name_en, logo_url, address, phone, email, tax_number, commercial_reg, currency, vat_rate, settings')
+            .eq('id', profile.company_id)
+            .single()
 
-          // Update last_login in background (don't await)
-          supabase.from('users').update({ last_login: new Date().toISOString() }).eq('id', authUser.id).then(() => {})
+          // Update last_login silently in background
+          supabase.from('users')
+            .update({ last_login: new Date().toISOString() })
+            .eq('id', authUser.id)
+            .then(() => {})
 
           set({
-            user: { ...profileResult, email: authUser.email } as User,
-            company: companyResult as Company,
+            user:            { ...profile, email: authUser.email } as User,
+            company:         companyError ? get().company : company as Company,
             isAuthenticated: true,
-            isLoading: false
+            isLoading:       false,
           })
         } catch (e) {
-          console.error('[auth] exception:', e)
+          console.error('[auth]', e)
           set({ isLoading: false, isAuthenticated: true })
         }
       },
@@ -97,17 +100,17 @@ export const useAuthStore = create<AuthState>()(
         const { user } = get()
         if (!user) return false
         if (user.role === 'admin') return true
-        const key = `${module}:${action}`
-        return user.permissions?.[key] === true
-      }
+        const perms = user.permissions as Record<string, boolean> | null
+        return perms?.[`${module}:${action}`] === true
+      },
     }),
     {
       name: 'erp-auth',
-      partialize: (state) => ({
-        user: state.user,
-        company: state.company,
-        isAuthenticated: state.isAuthenticated
-      })
+      partialize: (s) => ({
+        user:            s.user,
+        company:         s.company,
+        isAuthenticated: s.isAuthenticated,
+      }),
     }
   )
 )

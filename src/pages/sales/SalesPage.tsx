@@ -62,7 +62,7 @@ export default function SalesPage() {
     }
   ]
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const exportData = invoices.map(inv => ({
       'رقم الفاتورة': inv.invoice_number,
       'العميل': inv.customer?.name_ar || 'عميل نقدي',
@@ -73,7 +73,7 @@ export default function SalesPage() {
       'الحالة': inv.status,
       'طريقة الدفع': getPaymentMethodLabel(inv.payment_method)
     }))
-    exportToExcel(exportData, 'تقرير-المبيعات')
+    await exportToExcel(exportData, 'تقرير-المبيعات')
   }
 
   // Summary stats

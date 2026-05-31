@@ -1,246 +1,199 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useWarehouses } from '@/hooks/useWarehouses'
 import PageHeader from '@/components/shared/PageHeader'
-import DataTable, { Column } from '@/components/shared/DataTable'
-import ImportExportModal from '@/components/shared/ImportExportModal'
-import { formatNumber, formatDate } from '@/lib/utils'
-import { exportInventory, type ImportRow } from '@/lib/importExport'
-import { Package, AlertTriangle, TrendingDown, TrendingUp, ArrowLeftRight, Upload, Download } from 'lucide-react'
+import { formatNumber } from '@/lib/utils'
+import { Package, AlertTriangle, TrendingDown, ArrowLeftRight, Search, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-interface InventoryItem {
-  id: string
-  product_id: string
-  warehouse_id: string
-  quantity: number
-  available_quantity: number
-  batch_number: string
-  expiry_date: string
-  updated_at: string
-  product: { name_ar: string; barcode: string; min_stock_alert: number; unit: { abbreviation: string } }
-  warehouse: { name_ar: string }
-}
-
 export default function InventoryPage() {
-  const navigate = useNavigate()
-  const { user } = useAuthStore()
-  const qc = useQueryClient()
+  const navigate  = useNavigate()
+  const { user }  = useAuthStore()
+  const qc        = useQueryClient()
   const { data: warehouses = [] } = useWarehouses()
+
   const [warehouseId, setWarehouseId] = useState('')
   const [search, setSearch]           = useState('')
-  const [showImport, setShowImport]   = useState(false)
 
-  const { data: inventory = [], isLoading } = useQuery<InventoryItem[]>({
-    queryKey: ['inventory', user?.company_id, warehouseId, search],
+  const { data: inventory = [], isLoading, refetch } = useQuery({
+    queryKey: ['inventory', user?.company_id, warehouseId],
     queryFn: async () => {
-      // Filter by company's warehouses to scope inventory to this company
-      const warehouseIds = warehouseId
-        ? [warehouseId]
-        : (warehouses.map(w => w.id))
+      if (!user?.company_id) return []
 
-      let query = supabase
+      // Always scope to this company's warehouses — prevent data leak
+      const companyWarehouseIds = warehouses.map(w => w.id)
+      if (companyWarehouseIds.length === 0) return []
+
+      const ids = warehouseId ? [warehouseId] : companyWarehouseIds
+
+      const { data, error } = await supabase
         .from('inventory')
-        .select('*, product:products(name_ar, barcode, min_stock_alert, unit:units(abbreviation)), warehouse:warehouses(name_ar)')
+        .select('id, product_id, warehouse_id, quantity, batch_number, expiry_date, updated_at, product:products(name_ar, barcode, min_stock_alert, unit:units(abbreviation)), warehouse:warehouses(name_ar)')
+        .in('warehouse_id', ids)
+        .gt('quantity', 0)          // فقط الأصناف الموجودة
         .order('updated_at', { ascending: false })
+        .limit(1000)                // حد أقصى لمنع التحميل الزائد
 
-      if (warehouseIds.length > 0) {
-        query = query.in('warehouse_id', warehouseIds)
-      }
-      const { data, error } = await query
       if (error) throw error
-      let result = data as InventoryItem[]
-      if (search) result = result.filter(i => i.product?.name_ar?.includes(search) || i.product?.barcode?.includes(search))
-      return result
+      return data || []
     },
-    enabled: !!user
+    enabled: !!user?.company_id && warehouses.length > 0,
+    staleTime: 1000 * 60 * 2,     // 2 دقائق
   })
 
-  // ── Import inventory ──────────────────────────────────────────────────────
-  const handleImportInventory = async (rows: ImportRow[]) => {
-    if (!user) return
-    const defaultWarehouse = warehouses.find(w => w.is_default) || warehouses[0]
-    let success = 0
+  const filtered = useMemo(() => {
+    if (!search) return inventory
+    const q = search.toLowerCase()
+    return (inventory as any[]).filter(i =>
+      i.product?.name_ar?.toLowerCase().includes(q) ||
+      i.product?.barcode?.includes(q)
+    )
+  }, [inventory, search])
 
-    for (const row of rows) {
-      const d = row.data
-      // Find product by barcode or name
-      let productId: string | undefined
-      if (d.barcode) {
-        const { data: p } = await supabase.from('products').select('id')
-          .eq('company_id', user.company_id).eq('barcode', d.barcode).maybeSingle()
-        productId = p?.id
-      }
-      if (!productId && d.product_name) {
-        const { data: p } = await supabase.from('products').select('id')
-          .eq('company_id', user.company_id).ilike('name_ar', d.product_name).maybeSingle()
-        productId = p?.id
-      }
-      if (!productId) continue
-
-      // Find warehouse
-      let whId = defaultWarehouse?.id
-      if (d.warehouse) {
-        const wh = warehouses.find(w => w.name_ar === d.warehouse)
-        if (wh) whId = wh.id
-      }
-      if (!whId) continue
-
-      // Upsert inventory
-      await supabase.from('inventory').upsert({
-        product_id:   productId,
-        warehouse_id: whId,
-        quantity:     +d.quantity || 0,
-        batch_number: d.batch_number || null,
-        expiry_date:  d.expiry_date  || null,
-      }, { onConflict: 'product_id,warehouse_id,batch_number' })
-
-      // Log movement
-      await supabase.from('inventory_movements').insert({
-        company_id:     user.company_id,
-        product_id:     productId,
-        warehouse_id:   whId,
-        movement_type:  'adjustment',
-        quantity:       +d.quantity || 0,
-        cost_price:     +d.cost_price || null,
-        user_id:        user.id,
-        notes:          'استيراد مخزون من Excel',
-      })
-      success++
-    }
-
-    qc.invalidateQueries({ queryKey: ['inventory'] })
-    toast.success(`تم استيراد ${success} سجل مخزون بنجاح`)
-  }
-
-  const handleExportInventory = () => {
-    if (inventory.length === 0) { toast.error('لا توجد بيانات مخزون للتصدير'); return }
-    exportInventory(inventory as unknown as Record<string, unknown>[])
-    toast.success(`تم تصدير ${inventory.length} سجل مخزون`)
-  }
-
-  const lowStock = inventory.filter(i => i.quantity <= (i.product?.min_stock_alert || 0))
-  const totalItems = inventory.length
-  const totalValue = inventory.reduce((s, i) => s + i.quantity, 0)
-
-  const columns: Column<InventoryItem>[] = [
-    { key: 'product', label: 'المنتج', render: (_, row) => (
-      <div className="flex items-center gap-2">
-        {row.quantity <= (row.product?.min_stock_alert || 0) && (
-          <AlertTriangle className="w-3.5 h-3.5 text-orange-500 shrink-0" />
-        )}
-        <div>
-          <p className="font-medium text-sm">{row.product?.name_ar}</p>
-          {row.product?.barcode && <p className="text-xs text-muted-foreground font-mono">{row.product.barcode}</p>}
-        </div>
-      </div>
-    )},
-    { key: 'warehouse', label: 'المستودع', render: (_, row) => <span className="text-sm text-muted-foreground">{row.warehouse?.name_ar}</span> },
-    { key: 'quantity', label: 'الكمية المتاحة', sortable: true, render: (v, row) => (
-      <span className={`font-bold text-sm ${Number(v) <= (row.product?.min_stock_alert || 0) ? 'text-orange-500' : 'text-foreground'}`}>
-        {formatNumber(Number(v), 3)} {row.product?.unit?.abbreviation || ''}
-      </span>
-    )},
-    { key: 'available_quantity', label: 'الكمية القابلة للبيع', render: v => <span className="text-sm text-emerald-600">{formatNumber(Number(v), 3)}</span> },
-    { key: 'batch_number', label: 'رقم الدفعة', render: v => <span className="text-xs font-mono text-muted-foreground">{String(v || '—')}</span> },
-    { key: 'expiry_date', label: 'تاريخ الانتهاء', render: v => v ? (
-      <span className={`text-xs ${new Date(String(v)) < new Date() ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
-        {formatDate(String(v))}
-      </span>
-    ) : <span className="text-muted-foreground">—</span> },
-    { key: 'updated_at', label: 'آخر تحديث', render: v => <span className="text-xs text-muted-foreground">{formatDate(String(v))}</span> }
-  ]
+  const stats = useMemo(() => ({
+    total:    filtered.length,
+    lowStock: (filtered as any[]).filter(i => i.quantity <= (i.product?.min_stock_alert || 0) && i.quantity > 0).length,
+    outStock: (inventory as any[]).filter(i => i.quantity <= 0).length,
+  }), [filtered, inventory])
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6" dir="rtl">
       <PageHeader
         title="حركة المخزون"
-        subtitle="متابعة الكميات والمستودعات"
+        subtitle={`${filtered.length} صنف`}
         actions={
-          <>
-            <button onClick={() => setShowImport(true)} className="btn-outline gap-1.5 text-sm">
-              <Upload className="w-4 h-4" />استيراد Excel
+          <div className="flex gap-2">
+            <button onClick={() => navigate('/inventory/warehouse-transfer')}
+              className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+              <ArrowLeftRight size={15} /> تحويل 1→2
             </button>
-            <button onClick={handleExportInventory} className="btn-outline gap-1.5 text-sm">
-              <Download className="w-4 h-4" />تصدير Excel
+            <button onClick={() => navigate('/inventory/warehouse1')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Package size={15} /> مخزن الوارد
             </button>
-            <button onClick={() => navigate('/inventory/transfer')} className="btn-outline gap-1.5 text-sm">
-              <ArrowLeftRight className="w-4 h-4" />تحويل مخزون
-            </button>
-          </>
+          </div>
         }
       />
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-card border border-border/60 rounded-xl px-4 py-3">
-          <div className="flex items-center gap-2 mb-1">
-            <Package className="w-4 h-4 text-blue-500" />
-            <p className="text-xs text-muted-foreground">إجمالي الأصناف</p>
-          </div>
-          <p className="text-xl font-bold">{totalItems}</p>
+      {/* إحصائيات */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl border p-4 text-center">
+          <div className="text-2xl font-bold text-blue-700">{stats.total}</div>
+          <div className="text-xs text-gray-500">إجمالي الأصناف</div>
         </div>
-        <div className="bg-card border border-border/60 rounded-xl px-4 py-3">
-          <div className="flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-4 h-4 text-orange-500" />
-            <p className="text-xs text-muted-foreground">منتجات نفد مخزونها</p>
-          </div>
-          <p className={`text-xl font-bold ${lowStock.length > 0 ? 'text-orange-500' : 'text-foreground'}`}>{lowStock.length}</p>
+        <div className="bg-amber-50 rounded-xl border border-amber-100 p-4 text-center cursor-pointer"
+          onClick={() => {}}>
+          <div className="text-2xl font-bold text-amber-700">{stats.lowStock}</div>
+          <div className="text-xs text-gray-500">مخزون منخفض</div>
         </div>
-        <div className="bg-card border border-border/60 rounded-xl px-4 py-3">
-          <div className="flex items-center gap-2 mb-1">
-            <TrendingUp className="w-4 h-4 text-emerald-500" />
-            <p className="text-xs text-muted-foreground">عدد المستودعات</p>
-          </div>
-          <p className="text-xl font-bold">{warehouses.length}</p>
+        <div className="bg-red-50 rounded-xl border border-red-100 p-4 text-center">
+          <div className="text-2xl font-bold text-red-700">{stats.outStock}</div>
+          <div className="text-xs text-gray-500">نفذ المخزون</div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3">
-        <select value={warehouseId} onChange={e => setWarehouseId(e.target.value)} className="form-select h-9 text-sm w-48">
-          <option value="">كل المستودعات</option>
-          {warehouses.map(w => <option key={w.id} value={w.id}>{w.name_ar}</option>)}
-        </select>
-      </div>
-
-      {/* Low Stock Alert */}
-      {lowStock.length > 0 && (
-        <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="w-4 h-4 text-orange-600" />
-            <h3 className="font-semibold text-orange-700 dark:text-orange-400 text-sm">تنبيه: منتجات نفد مخزونها</h3>
+      {/* فلاتر */}
+      <div className="bg-white rounded-xl shadow-sm border p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative">
+            <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input placeholder="بحث باسم الصنف أو الباركود..."
+              value={search} onChange={e => setSearch(e.target.value)}
+              className="border rounded-lg px-3 py-2 pr-9 text-sm w-64" />
           </div>
-          <div className="flex flex-wrap gap-2">
-            {lowStock.slice(0, 8).map(item => (
-              <span key={item.id} className="px-2.5 py-1 bg-orange-100 dark:bg-orange-800/50 text-orange-700 dark:text-orange-300 rounded-lg text-xs">
-                {item.product?.name_ar}: {formatNumber(item.quantity, 2)}
-              </span>
+          <select value={warehouseId} onChange={e => setWarehouseId(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm">
+            <option value="">جميع المخازن</option>
+            {(warehouses as any[]).map(w => (
+              <option key={w.id} value={w.id}>{w.name_ar}</option>
             ))}
-          </div>
+          </select>
+          <button onClick={() => refetch()}
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600">
+            <RefreshCw size={13} /> تحديث
+          </button>
         </div>
-      )}
+      </div>
 
-      <DataTable
-        data={inventory}
-        columns={columns}
-        loading={isLoading}
-        searchable
-        searchPlaceholder="بحث بالاسم أو الباركود..."
-        onSearch={setSearch}
-        emptyMessage="لا توجد بيانات مخزون"
-      />
-
-      {showImport && (
-        <ImportExportModal
-          type="inventory"
-          onImport={handleImportInventory}
-          onClose={() => setShowImport(false)}
-        />
-      )}
+      {/* الجدول */}
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        {isLoading ? (
+          <div className="p-12 text-center text-gray-400">
+            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            جاري التحميل...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-12 text-center text-gray-400">
+            <Package size={40} className="mx-auto mb-3 opacity-30" />
+            <p>لا توجد بيانات مخزون</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">الصنف</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">المخزن</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">رقم الدفعة</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">الصلاحية</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-600">الكمية</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-600">الحالة</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(filtered as any[]).map((item: any) => {
+                  const isLow  = item.quantity > 0 && item.quantity <= (item.product?.min_stock_alert || 0)
+                  const isExp  = item.expiry_date && new Date(item.expiry_date) < new Date()
+                  return (
+                    <tr key={item.id} className={`hover:bg-gray-50 ${isExp ? 'bg-red-50' : ''}`}>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{item.product?.name_ar}</div>
+                        {item.product?.barcode && (
+                          <div className="text-xs text-gray-400 font-mono">{item.product.barcode}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-sm">{item.warehouse?.name_ar}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.batch_number || '—'}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {item.expiry_date ? (
+                          <span className={isExp ? 'text-red-600 font-medium' : 'text-green-600'}>
+                            {isExp && <AlertTriangle size={12} className="inline ml-1" />}
+                            {new Date(item.expiry_date).toLocaleDateString('ar-SA')}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`font-bold text-lg ${
+                          item.quantity <= 0 ? 'text-red-600' : isLow ? 'text-amber-600' : 'text-green-600'
+                        }`}>
+                          {formatNumber(item.quantity)}
+                        </span>
+                        {item.product?.unit?.abbreviation && (
+                          <span className="text-xs text-gray-400 mr-1">{item.product.unit.abbreviation}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {isExp ? (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs">منتهي الصلاحية</span>
+                        ) : item.quantity <= 0 ? (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs">نفذ</span>
+                        ) : isLow ? (
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs">منخفض</span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">متاح</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
