@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import {
   Plus, Search, Download, RefreshCw, Trash2, AlertCircle, Loader2, TrendingUp
 } from 'lucide-react'
@@ -9,7 +9,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
 
 export default function BankDepositsPage() {
   const { company, user } = useAuthStore()
@@ -133,7 +132,8 @@ export default function BankDepositsPage() {
     }
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(d => ({
       'رقم الإيداع':  d.deposit_number,
       'التاريخ':      formatDate(d.deposit_date),

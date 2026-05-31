@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      devOptions: { enabled: true },
+      devOptions: { enabled: false },
       includeAssets: ['favicon.svg', 'icons/*.png'],
       manifest: {
         name: 'نظام الإدارة المتكامل',
@@ -26,12 +26,27 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // فقط الملفات الأساسية — لا نحمّل 136 ملف JS عند أول زيارة
+        globPatterns: ['**/*.{css,html,ico,png,svg,woff2}'],
+        // لا تشمل ملفات JS في precache
+        globIgnores: ['**/assets/*.js'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'CacheFirst',
-            options: { cacheName: 'google-fonts-cache', expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 } }
+            options: {
+              cacheName: 'google-fonts-cache',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 }
+            }
+          },
+          // كاش ذكي لملفات JS — NetworkFirst حتى لا يبقى الكود القديم
+          {
+            urlPattern: /\/assets\/.*\.js$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'js-cache',
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 7 }
+            }
           }
         ]
       }
@@ -43,19 +58,32 @@ export default defineConfig({
     }
   },
   build: {
+    // تحذيرات chunk للمراقبة
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['framer-motion', 'lucide-react', 'recharts'],
-          supabase: ['@supabase/supabase-js'],
-          query: ['@tanstack/react-query'],
-          forms: ['react-hook-form', 'zod', '@hookform/resolvers'],
-          export: ['jspdf', 'jspdf-autotable', 'xlsx']
+        // تقسيم ذكي للـ chunks — كل مكتبة ثقيلة في ملفها الخاص
+        manualChunks(id) {
+          // مكتبات التصدير — تُحمَّل فقط عند الحاجة (dynamic import)
+          if (id.includes('xlsx'))        return 'xlsx'
+          if (id.includes('jspdf'))       return 'jspdf'
+          if (id.includes('html2canvas')) return 'html2canvas'
+
+          // مكتبات UI ثقيلة منفصلة
+          if (id.includes('framer-motion')) return 'framer-motion'
+          if (id.includes('recharts'))      return 'recharts'
+
+          // core vendor
+          if (id.includes('react-dom'))       return 'react-dom'
+          if (id.includes('react-router-dom') || id.includes('react-router')) return 'react-router'
+          if (id.includes('@supabase'))       return 'supabase'
+          if (id.includes('@tanstack/react-query')) return 'react-query'
+          if (id.includes('react-hook-form') || id.includes('zod') || id.includes('@hookform')) return 'forms'
+          if (id.includes('lucide-react'))    return 'icons'
+          if (id.includes('date-fns'))        return 'date-fns'
         }
       }
-    },
-    chunkSizeWarningLimit: 1000
+    }
   },
   server: {
     port: 3000,

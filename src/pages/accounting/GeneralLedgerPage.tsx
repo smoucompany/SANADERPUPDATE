@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BookOpen, Calendar, Download, Search, FileText, ArrowRight, Printer, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -7,7 +7,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import { PrintAccountingHeader, PrintAccountingFooter } from '@/components/print/PrintAccountingHeader'
 import { formatCurrency, formatDate, today } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
-import * as XLSX from 'xlsx'
 
 interface LedgerLine {
   id: string
@@ -148,8 +147,9 @@ export default function GeneralLedgerPage() {
   })
 
   // Export to Excel helper
-  const handleExport = () => {
+  const handleExport = async () => {
     if (!selectedAccount) return
+    const XLSX = await import('xlsx')
     const rows = filteredLines.map(l => ({
       'رقم القيد': l.journal_entry.entry_number,
       'التاريخ': formatDate(l.journal_entry.entry_date),

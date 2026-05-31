@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -15,7 +15,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import DataTable, { Column } from '@/components/shared/DataTable'
 import { formatCurrency, formatDate, getPaymentMethodLabel, today } from '@/lib/utils'
 import type { Payment } from '@/types'
-import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import 'jspdf-autotable'
 
@@ -91,7 +90,8 @@ export default function VouchersPage() {
   }, [vouchers])
 
   // Exports
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
+    const XLSX = await import('xlsx')
     const exportData = vouchers.map(v => ({
       'رقم السند': v.payment_number,
       'نوع السند': v.type === 'receipt' ? 'سند قبض' : 'سند صرف',
@@ -110,7 +110,7 @@ export default function VouchersPage() {
     XLSX.writeFile(wb, `سندات_القبض_والصرف_${today()}.xlsx`)
   }
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     const doc = new jsPDF()
     doc.addFont('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf', 'Roboto', 'normal')
     doc.setFont('Roboto')

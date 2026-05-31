@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BarChart3, Download, FileText, Printer, ShieldCheck, Scale, Award, TrendingUp, DollarSign } from 'lucide-react'
 import TradingAccountTab from './TradingAccountTab'
@@ -8,7 +8,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import { PrintAccountingHeader, PrintAccountingFooter } from '@/components/print/PrintAccountingHeader'
 import { formatCurrency } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
-import * as XLSX from 'xlsx'
 
 export default function FinancialStatementsPage() {
   const { company, user } = useAuthStore()
@@ -154,7 +153,8 @@ export default function FinancialStatementsPage() {
   } = processedData
 
   // Export helper
-  const handleExport = () => {
+  const handleExport = async () => {
+    const XLSX = await import('xlsx')
     let exportData: any[] = []
     let filename = 'القوائم_المالية'
 

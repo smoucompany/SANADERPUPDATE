@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, ArrowRight, ArrowLeftRight, Download,
@@ -11,7 +11,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
 
 export default function CashboxTransfersPage() {
   const navigate = useNavigate()
@@ -167,7 +166,8 @@ export default function CashboxTransfersPage() {
     }
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(t => ({
       'رقم المستند':    t.transfer_number,
       'التاريخ':       formatDate(t.transfer_date),

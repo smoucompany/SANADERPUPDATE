@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowRight, Download, FileText, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
@@ -7,7 +7,6 @@ import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
 
 const DOC_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   purchase: { label: 'فاتورة مشتريات', color: 'bg-blue-100 text-blue-700' },
@@ -60,7 +59,8 @@ export default function SupplierStatementPage() {
   const totalCredit  = useMemo(() => (statement as any[]).reduce((s, r) => s + (r.credit || 0), 0), [statement])
   const finalBalance = totalDebit - totalCredit
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = (statement as any[]).map((r, i) => ({
       '#':           i + 1,
       'التاريخ':    formatDate(r.doc_date),

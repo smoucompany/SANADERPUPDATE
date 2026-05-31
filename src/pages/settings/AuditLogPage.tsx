@@ -1,10 +1,9 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { Search, Download, RefreshCw, Shield } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { supabase } from '@/lib/supabase'
 import { formatDate } from '@/lib/utils'
 import PageHeader from '@/components/shared/PageHeader'
-import * as XLSX from 'xlsx'
 import { useQuery } from '@tanstack/react-query'
 
 const ACTION_LABELS: Record<string, { label: string; color: string }> = {
@@ -74,7 +73,8 @@ export default function AuditLogPage() {
       (!userFilter || l.user_id === userFilter)
     ), [logs, search, userFilter])
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(l => ({
       'التاريخ والوقت': new Date(l.created_at).toLocaleString('ar'),
       'المستخدم':       (l.user as any)?.full_name || l.user_name || '—',

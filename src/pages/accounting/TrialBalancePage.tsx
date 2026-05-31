@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BarChart3, Calendar, Download, FileText, Printer, CheckCircle, AlertTriangle, ChevronRight, Layers } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -7,7 +7,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import { PrintAccountingHeader, PrintAccountingFooter } from '@/components/print/PrintAccountingHeader'
 import { formatCurrency, formatDate, today } from '@/lib/utils'
 import { motion } from 'framer-motion'
-import * as XLSX from 'xlsx'
 
 interface TrialBalanceRow {
   id: string
@@ -217,7 +216,8 @@ export default function TrialBalancePage() {
     Math.abs(totals.endDebit - totals.endCredit) < 0.05
 
   // Export to Excel
-  const handleExport = () => {
+  const handleExport = async () => {
+    const XLSX = await import('xlsx')
     const rows = filteredRows.map(r => ({
       'كود الحساب': r.code,
       'اسم الحساب': r.name_ar,

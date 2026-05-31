@@ -1,11 +1,10 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { Plus, Search, Download } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDate, today } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -127,7 +126,8 @@ export default function BankWithdrawalsPage() {
     }
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(w => ({
       'رقم المستند':       w.withdrawal_number,
       'التاريخ':           formatDate(w.withdrawal_date),

@@ -1,11 +1,10 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { Package, Search, Download, AlertTriangle, RefreshCw, Warehouse } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { formatCurrency, formatDate, today } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import { useQuery } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
 
 export default function Warehouse1Page() {
   const { company } = useAuthStore()
@@ -82,7 +81,8 @@ export default function Warehouse1Page() {
     expired:      (batches as any[]).filter(b => b.expiry_date && new Date(b.expiry_date) < now && b.quantity_remaining > 0).length,
   }), [filtered, batches])
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(b => ({
       'المنتج':          b.product_name || '',
       'الكود':           b.product_code || '',

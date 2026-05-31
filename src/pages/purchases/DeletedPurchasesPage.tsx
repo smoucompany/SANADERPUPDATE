@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, RotateCcw, Search, AlertCircle, Trash2, Eye, RefreshCw } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
@@ -7,7 +7,6 @@ import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
 
 export default function DeletedPurchasesPage() {
   const navigate = useNavigate()
@@ -121,7 +120,8 @@ export default function DeletedPurchasesPage() {
     }
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(p => ({
       'رقم الفاتورة': p.purchase_number,
       'المورد': p.supplier?.name_ar || '',

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+﻿import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Trash2, Save, ArrowRight, ArrowLeftRight,
@@ -10,7 +10,6 @@ import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
 
 interface TransferLine {
   _id: string

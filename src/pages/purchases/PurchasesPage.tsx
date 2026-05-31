@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus, Search, Eye, Edit2, Trash2, FileText, Download,
@@ -12,7 +12,6 @@ import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import StatusBadge from '@/components/shared/StatusBadge'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
-import * as XLSX from 'xlsx'
 import toast from 'react-hot-toast'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -148,7 +147,8 @@ export default function PurchasesPage() {
     setDeletePassword('')
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(p => ({
       'رقم الفاتورة':         p.purchase_number,
       'التاريخ':              formatDate(p.purchase_date),

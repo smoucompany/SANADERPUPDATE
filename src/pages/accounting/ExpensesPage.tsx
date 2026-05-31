@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Receipt, Search, Download, RefreshCw, AlertCircle, Loader2, Settings } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -8,7 +8,6 @@ import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import StatusBadge from '@/components/shared/StatusBadge'
 import toast from 'react-hot-toast'
-import * as XLSX from 'xlsx'
 
 const PAYMENT_METHODS = [
   { value: 'cash',     label: 'نقدي (خزينة رئيسية)', icon: '💵' },
@@ -200,7 +199,8 @@ export default function ExpensesPage() {
     }
   }
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import('xlsx')
     const rows = filtered.map(e => ({
       'رقم المستند':  e.document_number || '',
       'التاريخ':     formatDate(e.expense_date),

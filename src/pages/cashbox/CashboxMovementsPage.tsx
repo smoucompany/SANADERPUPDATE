@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Download, RefreshCw, TrendingUp, TrendingDown, Wallet } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
@@ -6,7 +6,6 @@ import { formatCurrency, formatDate, today } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import PageHeader from '@/components/shared/PageHeader'
 import { useQuery } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
 
 const REF_TYPE_LABELS: Record<string, string> = {
   invoice:          'فاتورة مبيعات',
@@ -65,8 +64,9 @@ export default function CashboxMovementsPage() {
   const totalDebit  = useMemo(() => (movements as any[]).reduce((s, m) => s + (m.debit || 0), 0), [movements])
   const totalCredit = useMemo(() => (movements as any[]).reduce((s, m) => s + (m.credit || 0), 0), [movements])
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
     if (movements.length === 0) return
+    const XLSX = await import('xlsx')
     const rows = (movements as any[]).map((m, i) => ({
       '#':           i + 1,
       'التاريخ':     formatDate(m.movement_date),

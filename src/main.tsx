@@ -7,36 +7,29 @@ import './index.css'
 import './styles/print.css'
 
 registerSW({
-  onOfflineReady() {
-    console.log('PWA offline ready')
-  },
-  onRegistered(registration?: ServiceWorkerRegistration) {
-    console.log('Service worker registered', registration)
-  },
-  onRegisterError(error: any) {
-    console.warn('Service worker registration failed:', error)
-  }
+  onOfflineReady() {},
+  onRegistered() {},
+  onRegisterError() {}
 })
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 5,
-      gcTime: 1000 * 60 * 10,
-      retry: 2,
-      refetchOnWindowFocus: false
+      staleTime:            1000 * 60 * 5,  // 5 دقائق — لا نعيد الجلب إلا بعدها
+      gcTime:               1000 * 60 * 15, // 15 دقيقة في الذاكرة
+      retry:                1,              // محاولة واحدة فقط عند الفشل
+      refetchOnWindowFocus: false,          // لا نعيد الجلب عند التبديل بين النوافذ
+      refetchOnReconnect:   true,
+      networkMode:          'online'
     },
     mutations: {
-      retry: 1
+      retry: 0  // لا نعيد محاولة الحفظ تلقائياً
     }
   }
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </React.StrictMode>
+  <QueryClientProvider client={queryClient}>
+    <App />
+  </QueryClientProvider>
 )
-
