@@ -26,65 +26,77 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // فقط الملفات الأساسية — لا نحمّل 136 ملف JS عند أول زيارة
+        // فقط CSS + HTML في precache — JS يُحمَّل بذكاء
         globPatterns: ['**/*.{css,html,ico,png,svg,woff2}'],
-        // لا تشمل ملفات JS في precache
         globIgnores: ['**/assets/*.js'],
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
+            urlPattern: /\/assets\/pages-.*\.js$/,
+            handler: 'CacheFirst',  // صفحات المجموعات — كاش طويل
             options: {
-              cacheName: 'google-fonts-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 }
+              cacheName: 'pages-cache',
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 7 }
             }
           },
-          // كاش ذكي لملفات JS — NetworkFirst حتى لا يبقى الكود القديم
           {
-            urlPattern: /\/assets\/.*\.js$/,
-            handler: 'NetworkFirst',
+            urlPattern: /\/assets\/(?!pages-).*\.js$/,
+            handler: 'CacheFirst',  // مكتبات — كاش دائم
             options: {
-              cacheName: 'js-cache',
-              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 7 }
+              cacheName: 'vendor-cache',
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 30 }
             }
           }
         ]
       }
     })
   ],
+
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src')
-    }
+    alias: { '@': path.resolve(__dirname, './src') }
   },
+
   build: {
-    // تحذيرات chunk للمراقبة
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
-        // تقسيم ذكي للـ chunks — كل مكتبة ثقيلة في ملفها الخاص
         manualChunks(id) {
-          // مكتبات التصدير — تُحمَّل فقط عند الحاجة (dynamic import)
-          if (id.includes('xlsx'))        return 'xlsx'
-          if (id.includes('jspdf'))       return 'jspdf'
-          if (id.includes('html2canvas')) return 'html2canvas'
+          // ══ مكتبات خارجية ثقيلة — lazy load عند الحاجة ══
+          if (id.includes('xlsx'))        return 'lib-xlsx'
+          if (id.includes('jspdf'))       return 'lib-jspdf'
+          if (id.includes('html2canvas')) return 'lib-html2canvas'
+          if (id.includes('recharts'))    return 'lib-recharts'
 
-          // مكتبات UI ثقيلة منفصلة
-          if (id.includes('framer-motion')) return 'framer-motion'
-          if (id.includes('recharts'))      return 'recharts'
+          // ══ مكتبات core — تُحمَّل مع الباندل الأول ══
+          if (id.includes('framer-motion'))                      return 'vendor-motion'
+          if (id.includes('react-dom'))                          return 'vendor-react'
+          if (id.includes('react-router-dom') || id.includes('react-router')) return 'vendor-router'
+          if (id.includes('@supabase'))                          return 'vendor-supabase'
+          if (id.includes('@tanstack/react-query'))              return 'vendor-query'
+          if (id.includes('react-hook-form') || id.includes('zod') || id.includes('@hookform')) return 'vendor-forms'
+          if (id.includes('lucide-react'))                       return 'vendor-icons'
+          if (id.includes('date-fns'))                           return 'vendor-dates'
 
-          // core vendor
-          if (id.includes('react-dom'))       return 'react-dom'
-          if (id.includes('react-router-dom') || id.includes('react-router')) return 'react-router'
-          if (id.includes('@supabase'))       return 'supabase'
-          if (id.includes('@tanstack/react-query')) return 'react-query'
-          if (id.includes('react-hook-form') || id.includes('zod') || id.includes('@hookform')) return 'forms'
-          if (id.includes('lucide-react'))    return 'icons'
-          if (id.includes('date-fns'))        return 'date-fns'
+          // ══ صفحات مُجمَّعة — تحميل كل مجموعة معاً ══
+          // عند فتح أي صفحة مبيعات → تُحمَّل كل صفحات المبيعات دفعة واحدة
+          if (id.includes('src/pages/sales/'))      return 'pages-sales'
+          if (id.includes('src/pages/purchases/'))  return 'pages-purchases'
+          if (id.includes('src/pages/inventory/'))  return 'pages-inventory'
+          if (id.includes('src/pages/accounting/')) return 'pages-accounting'
+          if (id.includes('src/pages/hr/'))         return 'pages-hr'
+          if (id.includes('src/pages/crm/'))        return 'pages-crm'
+          if (id.includes('src/pages/cashbox/'))    return 'pages-cashbox'
+          if (id.includes('src/pages/suppliers/'))  return 'pages-suppliers'
+          if (id.includes('src/pages/customers/'))  return 'pages-customers'
+          if (id.includes('src/pages/vouchers/'))   return 'pages-vouchers'
+          if (id.includes('src/pages/settings/'))   return 'pages-settings'
+          if (id.includes('src/pages/restaurant/')) return 'pages-restaurant'
+          if (id.includes('src/pages/reports/'))    return 'pages-reports'
+          if (id.includes('src/pages/pos/'))        return 'pages-pos'
         }
       }
     }
   },
+
   server: {
     port: 3000,
     host: true
